@@ -48,7 +48,7 @@ layout.
 
 - ffmpeg (runtime, for concat/fallback)
 - Chrome/Chromium (scraping — bypasses Cloudflare)
-- Go 1.25 only when building from source; prebuilt archives need none
+- Go 1.26 only when building from source; prebuilt archives need none
 - Docker is optional: required for development/CI, not for running the
   released binary
 

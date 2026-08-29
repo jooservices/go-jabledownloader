@@ -112,8 +112,8 @@ func (p *picker) redraw() {
 	var b strings.Builder
 	b.WriteString("\033[H\033[2J")
 	b.WriteString(ColorCyan + ColorBold)
-	b.WriteString(fmt.Sprintf("  %s  %s(%d/%d selected)%s",
-		p.title, ColorDim, p.selectedCount(), len(p.items), ColorReset))
+	fmt.Fprintf(&b, "  %s  %s(%d/%d selected)%s",
+		p.title, ColorDim, p.selectedCount(), len(p.items), ColorReset)
 	b.WriteString(ColorReset)
 	b.WriteString("\r\n")
 

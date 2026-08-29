@@ -122,14 +122,14 @@ func (p *Progress) renderSegments() string {
 	b.WriteString(ColorDim + strings.Repeat("─", max(empty, 0)))
 	b.WriteString(ColorCyan + "]" + ColorReset)
 
-	b.WriteString(fmt.Sprintf(" %s%3.0f%%%s", ColorBold, pct, ColorReset))
-	b.WriteString(fmt.Sprintf("  %s%d%s/%s%d%s",
+	fmt.Fprintf(&b, " %s%3.0f%%%s", ColorBold, pct, ColorReset)
+	fmt.Fprintf(&b, "  %s%d%s/%s%d%s",
 		ColorGreen, p.done, ColorReset,
 		ColorCyan, p.total, ColorReset,
-	))
+	)
 
 	if p.failed > 0 {
-		b.WriteString(fmt.Sprintf("  %s✗ %d failed%s", ColorRed, p.failed, ColorReset))
+		fmt.Fprintf(&b, "  %s✗ %d failed%s", ColorRed, p.failed, ColorReset)
 	}
 
 	elapsed := time.Since(p.start)
@@ -137,12 +137,12 @@ func (p *Progress) renderSegments() string {
 		speed := float64(p.bytes) / elapsed.Seconds()
 		eta := time.Duration(float64(p.total-p.done) / float64(p.done) * elapsed.Seconds() * float64(time.Second))
 		if eta > 0 && p.done < p.total {
-			b.WriteString(fmt.Sprintf("  %s%s %seta %s%s%s",
+			fmt.Fprintf(&b, "  %s%s %seta %s%s%s",
 				ColorDim, IconClock, ColorReset,
 				ColorYellow, format.Duration(eta), ColorReset,
-			))
+			)
 		}
-		b.WriteString(fmt.Sprintf("  %s%s/s%s", ColorDim, format.Bytes(int64(speed)), ColorReset))
+		fmt.Fprintf(&b, "  %s%s/s%s", ColorDim, format.Bytes(int64(speed)), ColorReset)
 	}
 
 	return b.String()
@@ -151,17 +151,17 @@ func (p *Progress) renderSegments() string {
 func (p *Progress) renderFFmpeg() string {
 	var b strings.Builder
 	b.WriteString("  " + ColorCyan + IconVideo + ColorReset + " " + ColorBold + "Downloading" + ColorReset)
-	b.WriteString(fmt.Sprintf("  %s%s%s", ColorBold, format.Duration(time.Duration(p.seconds)*time.Second), ColorReset))
+	fmt.Fprintf(&b, "  %s%s%s", ColorBold, format.Duration(time.Duration(p.seconds)*time.Second), ColorReset)
 
 	if p.speed > 0 {
-		b.WriteString(fmt.Sprintf("  %s%.1fx%s", ColorDim, p.speed, ColorReset))
+		fmt.Fprintf(&b, "  %s%.1fx%s", ColorDim, p.speed, ColorReset)
 		if p.seconds > 0 {
 			elapsed := time.Since(p.start).Seconds()
 			etaSec := p.seconds/p.speed - elapsed
 			if etaSec > 0 {
-				b.WriteString(fmt.Sprintf("  %s%s %seta %s%s",
+				fmt.Fprintf(&b, "  %s%s %seta %s%s",
 					ColorDim, IconClock,
-					ColorYellow, format.Duration(time.Duration(etaSec)*time.Second), ColorReset))
+					ColorYellow, format.Duration(time.Duration(etaSec)*time.Second), ColorReset)
 			}
 		}
 	}
@@ -176,23 +176,23 @@ func (p *Progress) Summary() string {
 	var b strings.Builder
 	b.WriteString("\n")
 	b.WriteString(Bordered("Download Complete", ColorGreen))
-	b.WriteString(fmt.Sprintf("\n  %s%s Elapsed:%s %s\n",
-		ColorDim, IconClock, ColorReset, format.Duration(time.Since(p.start))))
+	fmt.Fprintf(&b, "\n  %s%s Elapsed:%s %s\n",
+		ColorDim, IconClock, ColorReset, format.Duration(time.Since(p.start)))
 
 	ok := ColorGreen + fmt.Sprintf("%s %d", IconOk, p.done) + ColorReset
 	fail := ColorRed + fmt.Sprintf("%s %d", IconErr, p.failed) + ColorReset
-	b.WriteString(fmt.Sprintf("  %-20s %s", ok, fail))
+	fmt.Fprintf(&b, "  %-20s %s", ok, fail)
 
 	if p.bytes > 0 {
-		b.WriteString(fmt.Sprintf("  %s%s %s%s",
+		fmt.Fprintf(&b, "  %s%s %s%s",
 			ColorDim, IconDisk, format.Bytes(p.bytes), ColorReset,
-		))
+		)
 	}
 
 	if len(p.fails) > 0 {
-		b.WriteString(fmt.Sprintf("\n\n  %s%s Failed:%s\n", ColorRed, IconErr, ColorReset))
+		fmt.Fprintf(&b, "\n\n  %s%s Failed:%s\n", ColorRed, IconErr, ColorReset)
 		for _, f := range p.fails {
-			b.WriteString(fmt.Sprintf("    %s%s — %s%s\n", ColorDim, IconErr, f, ColorReset))
+			fmt.Fprintf(&b, "    %s%s — %s%s\n", ColorDim, IconErr, f, ColorReset)
 		}
 	}
 
