@@ -24,6 +24,9 @@ type Options struct {
 	DryRun    bool
 	Yes       bool
 	Quiet     bool
+	Verbose   bool
+	Force     bool
+	TTY       bool
 	Workers   int
 	OutDir    string
 	Count     int
@@ -44,6 +47,10 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	ctx, span := s.span(ctx, "run.get", attribute.String("input", input))
 	defer span()
 
+	if !s.Opts.Quiet {
+		ui.StartBanner(s.Out)
+	}
+
 	videoURL, err := scraper.ResolveInput(input)
 	if err != nil {
 		return err
@@ -55,11 +62,16 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	}
 
 	videoDir := VideoDir(s.Config.OutputDir, info.Code)
-	s.Out.Printf("  %sTitle:%s   %s\n", ui.ColorDim, ui.ColorReset, info.Title)
-	s.Out.Printf("  %sCode:%s    %s\n", ui.ColorDim, ui.ColorReset, info.Code)
-	s.Out.Printf("  %sOutput:%s  %s\n", ui.ColorDim, ui.ColorReset, s.Config.OutputDir)
-	s.Out.Printf("  %sWorkers:%s %d\n", ui.ColorDim, ui.ColorReset, s.Config.WorkerCount)
-	s.Out.Println()
+	if !s.Opts.Quiet {
+		s.Out.Printf("  %sTitle:%s   %s\n", ui.ColorDim, ui.ColorReset, info.Title)
+		s.Out.Printf("  %sCode:%s    %s\n", ui.ColorDim, ui.ColorReset, info.Code)
+		s.Out.Printf("  %sOutput:%s  %s\n", ui.ColorDim, ui.ColorReset, s.Config.OutputDir)
+		s.Out.Printf("  %sWorkers:%s %d\n", ui.ColorDim, ui.ColorReset, s.Config.WorkerCount)
+		if s.Opts.Verbose {
+			s.Out.Printf("  %sPage:%s    %s\n", ui.ColorDim, ui.ColorReset, videoURL)
+		}
+		s.Out.Println()
+	}
 
 	if s.Opts.DryRun {
 		s.Out.Printf("  %s%s Dry run — nothing downloaded.%s\n", ui.ColorYellow, ui.IconSpark, ui.ColorReset)
@@ -73,6 +85,9 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 
 	s.Out.Printf("\n  %s%s Downloaded: %s%s\n", ui.ColorGreen, ui.IconOk, result.Path, ui.ColorReset)
 	s.Out.Printf("  %s%s Size: %s%s\n", ui.ColorDim, ui.IconDisk, format.Bytes(result.Size), ui.ColorReset)
+	if s.Opts.Verbose {
+		s.Out.Printf("  %sCodec:%s   %s\n", ui.ColorDim, ui.ColorReset, result.Codec)
+	}
 	return nil
 }
 
@@ -88,6 +103,10 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 		count = 10
 	}
 
+	if !s.Opts.Quiet {
+		ui.StartBanner(s.Out)
+	}
+
 	s.Out.Printf("  %sSource:%s   %s\n", ui.ColorDim, ui.ColorReset, label)
 	s.Out.Printf("  %sTarget:%s   %d videos\n", ui.ColorDim, ui.ColorReset, count)
 	s.Out.Printf("  %sOutput:%s  %s\n", ui.ColorDim, ui.ColorReset, s.Config.OutputDir)
@@ -97,9 +116,10 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 	var allVideos []scraper.VideoEntry
 	page := 1
 	for len(allVideos) < count {
+		s.Out.Printf("\r\033[K  %sScanning page %d...%s", ui.ColorDim, page, ui.ColorReset)
 		videos, err := fetcher(ctx, page)
 		if err != nil {
-			s.Out.Printf("  %s%s Scan page %d: %v%s\n", ui.ColorRed, ui.IconErr, page, err, ui.ColorReset)
+			s.Out.Printf("\r\033[K  %s%s Scan page %d: %v%s\n", ui.ColorRed, ui.IconErr, page, err, ui.ColorReset)
 			s.Tel.Warn(ctx, "scan page failed", attribute.Int("page", page), attribute.String("error", err.Error()))
 			break
 		}
@@ -109,6 +129,7 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 		allVideos = append(allVideos, videos...)
 		page++
 	}
+	s.Out.Print("\r\033[K")
 	if len(allVideos) > count {
 		allVideos = allVideos[:count]
 	}
@@ -150,10 +171,12 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 			continue
 		}
 
-		if existing := FindExistingVideo(videoDir, entry.Code); existing != "" {
-			s.Out.Printf("    %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
-			skipped++
-			continue
+		if !s.Opts.Force {
+			if existing := FindExistingVideo(videoDir, entry.Code); existing != "" {
+				s.Out.Printf("    %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+				skipped++
+				continue
+			}
 		}
 
 		info, err := s.fetchInfo(ctx, entry.URL)
@@ -229,12 +252,22 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 	}
 
 	progress := ui.NewProgress(0)
+	display := newProgressDisplay(s.Out, progress, s.Opts.Quiet, s.Opts.TTY)
+	defer display.stop()
+
 	dl := hls.NewDownloader(videoDir,
 		hls.WithWorkers(s.Config.WorkerCount),
 		hls.WithProgress(func(ev hls.Event) {
 			progress.Update(ev)
+			if ev.Kind == hls.EventResume && ev.Message != "" {
+				s.Out.Printf("  %s%s %s%s\n", ui.ColorYellow, ui.IconClock, ev.Message, ui.ColorReset)
+			}
 		}),
 	)
+
+	if s.Opts.Verbose {
+		s.Out.Printf("  %sHLS:%s     %s\n", ui.ColorDim, ui.ColorReset, info.HLSURL)
+	}
 
 	start := time.Now()
 	result, err := dl.Download(ctx, info.Code, info.HLSURL)
@@ -246,13 +279,70 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 		return nil, fmt.Errorf("download: %w", err)
 	}
 
+	if progress.SegmentsUsed() && !s.Opts.Quiet {
+		s.Out.Print(progress.Summary())
+	}
+
 	s.Tel.Count(ctx, "hls.videos", 1, attribute.String("outcome", "completed"))
 	s.Tel.Info(ctx, "video downloaded",
 		attribute.String("code", info.Code),
 		attribute.String("path", result.Path),
+		attribute.String("codec", result.Codec),
 		attribute.Int64("bytes", result.Size),
 	)
 	return result, nil
+}
+
+// progressDisplay renders the progress line at a fixed interval until stop.
+// On a TTY it overwrites a single line (carriage return). On a non-TTY
+// (pipes, docker logs) it prints newline-terminated snapshots instead, since
+// log collectors buffer output that lacks newlines.
+type progressDisplay struct {
+	w      ui.Writer
+	p      *ui.Progress
+	quiet  bool
+	tty    bool
+	done   chan struct{}
+	closed bool
+}
+
+func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressDisplay {
+	d := &progressDisplay{w: w, p: p, quiet: quiet, tty: tty, done: make(chan struct{})}
+	if quiet {
+		return d
+	}
+	interval := 120 * time.Millisecond
+	if !tty {
+		interval = 800 * time.Millisecond
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-d.done:
+				return
+			case <-ticker.C:
+				if d.tty {
+					d.w.Print(d.p.RenderLine())
+				} else {
+					d.w.Printf("%s\n", d.p.Render())
+				}
+			}
+		}
+	}()
+	return d
+}
+
+func (d *progressDisplay) stop() {
+	if d.closed {
+		return
+	}
+	d.closed = true
+	close(d.done)
+	if !d.quiet && d.tty {
+		d.w.Print("\r\033[K")
+	}
 }
 
 // pickVideos runs the interactive picker when appropriate.
