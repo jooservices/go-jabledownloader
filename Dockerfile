@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

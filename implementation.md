@@ -42,6 +42,15 @@ make docker-build  # runtime image
 make docker-run    # run the image (ARGS="get jur-827")
 ```
 
+## Releases
+
+- Asset contract (consumed by `internal/update`):
+  `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz` containing the
+  `jabledownloader` binary (`jabledownloader.exe` on Windows).
+- Build all archives with `make release` (runs inside the build container);
+  output lands in `dist/` with `checksums.txt`.
+- Tags are created from `master` after the release PR merges green.
+
 ## Exit codes
 
 | Code | Meaning |
