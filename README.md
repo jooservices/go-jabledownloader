@@ -40,19 +40,26 @@ kept with the archived binary, its config, or its output layout.
 
 ## Requirements
 
-- Prebuilt binary from a release archive, or Go 1.25 to build
-- ffmpeg (runtime), Chrome/Chromium (scraping)
+- ffmpeg (runtime, for concat/fallback)
+- Chrome/Chromium (scraping — bypasses Cloudflare)
+- Go 1.25 only when building from source; prebuilt archives need none
+- Docker is **optional**: required for development/CI, not for running the
+  released binary
 
 ## Installation
 
 ```bash
-# From a release archive (jabledownloader_v4.0.0_<goos>_<goarch>.tar.gz):
+# 1. Prebuilt release archive — no Docker needed:
 tar -xzf jabledownloader_v4.0.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 
-# Or build locally / via Docker:
+# 2. Build from source (inside the build container):
 make build                 # bin/jabledownloader
+
+# 3. Or run the Docker image instead of a host binary:
 make docker-build          # jooservices/go-jabledownloader:latest
+docker run --rm -it --shm-size=1g -v $PWD/videos:/data \
+    jooservices/go-jabledownloader:latest get jur-827
 ```
 
 ## Quick start
@@ -70,17 +77,53 @@ See `knowledge.md` (design authority) and `implementation.md` (execution
 contract). Key invariants: layered `internal/` packages, pure HLS engine,
 fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
 
-## Observability (optional)
+## Observability — optional, with the JOOservices OpenObserve
 
-Copy `.env.example` to `.env`, set `OBS_*` to the JOOservices OpenObserve
-instance (repo `jooservices/openobserve`), and export them:
+Telemetry is **off by default and not bundled**: jabledownloader works fully
+without any OBS component, and `OBS_*` env vars are the only link between
+the two projects. Fail-open: an unreachable OBS never affects downloads.
+
+### Step 1 — start OpenObserve (one time)
+
+OBS lives in its own repository, `jooservices/openobserve`:
 
 ```bash
-export OBS_ENDPOINT=http://localhost:5080 OBS_ORG=jooservices \
-       OBS_STREAM=jabledownloader OBS_USER=... OBS_PASSWORD=...
+git clone git@github.com:jooservices/openobserve.git
+cd openobserve
+cp .env.example .env        # set OBS_ROOT_EMAIL / OBS_ROOT_PASSWORD
+make up && make status      # UI on http://localhost:5080
+make smoke                  # bootstrap org jooservices + jabledownloader stream
 ```
 
-Without `OBS_ENDPOINT` the CLI runs with telemetry disabled.
+### Step 2 — create the ingestion user (one time)
+
+jabledownloader must not use root credentials. Create a producer user in the
+`jooservices` org (UI: IAM → Users, or API
+`POST /api/jooservices/users`), e.g. `telemetry@jooservices.com`.
+
+### Step 3 — point jabledownloader at it
+
+```bash
+export OBS_ENDPOINT=http://localhost:5080
+export OBS_ORG=jooservices
+export OBS_STREAM=jabledownloader
+export OBS_USER=telemetry@jooservices.com
+export OBS_PASSWORD=...          # from the producer user
+
+jabledownloader get jur-827
+```
+
+### Step 4 — inspect the data
+
+Open `http://localhost:5080`, log in, switch the org dropdown to
+**jooservices**, then open:
+
+- Stream `jabledownloader` (logs) — crawl/parse/download events with
+  `code`, `title`, `video_id`, `trace_id`
+- Stream `jabledownloader` (traces) — `run.get` → `crawl.fetch_video_info`
+  → `video.download` spans
+- Metric streams — `crawl_request_total{status}`, `hls.videos{outcome}`,
+  `crawl_fetch_video_info_duration_ms`, `hls.video.duration_ms`
 
 ## Releases
 
@@ -90,7 +133,7 @@ checksums into `dist/` — the exact assets the `update` command consumes.
 
 ## Development
 
-Docker-only loop:
+Docker-only loop (development and CI run in containers):
 
 ```bash
 make ci              # fmt + vet + lint + test
