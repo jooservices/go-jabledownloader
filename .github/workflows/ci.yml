@@ -17,7 +17,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates ffmpeg chromium
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.5.0
 
       - name: Download modules
         run: go mod download
