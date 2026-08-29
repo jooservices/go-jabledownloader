@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    container: golang:1.25-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates ffmpeg chromium
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Format check
+        run: make fmt-check
+
+      - name: Vet
+        run: make vet
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test

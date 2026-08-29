@@ -1,0 +1,18 @@
+# Binaries
+/jabledownloader
+/bin/
+/dist/
+
+# Env & secrets
+.env
+*.local
+
+# OS
+.DS_Store
+
+# Coverage & test artifacts
+coverage.out
+*.prof
+
+# Downloaded videos (output)
+/videos/
