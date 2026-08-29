@@ -8,7 +8,7 @@
 - Repository: `go-jabledownloader`; module: `github.com/jooservices/go-jabledownloader`.
 - Product: a CLI that downloads videos from Jable.TV (HLS). Not an SDK, not a
   service.
-- Language baseline: Go 1.25 (workspace standard, see `go-flickr`).
+- Language baseline: Go 1.25 (workspace standard).
 - Version line: v4.0.0 is the first release of the rebuild. The archived
   binary line is superseded without a compatibility promise; release asset
   contract: `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz`.
