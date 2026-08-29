@@ -40,7 +40,7 @@ docker-run: ## Run the image (args via ARGS="--help")
 
 docker-test: ## Run quality gates inside the build container
 	docker run --rm -v "$$PWD":/src -w /src golang:1.26-bookworm \
-		sh -c "apt-get update >/dev/null 2>&1 && apt-get install -y ca-certificates ffmpeg chromium >/dev/null 2>&1; curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.5.0; make ci"
+		sh -c "apt-get update >/dev/null 2>&1 && apt-get install -y ca-certificates ffmpeg chromium >/dev/null 2>&1; GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2; make ci"
 
 release: ## Cross-compile release archives into dist/
 	@mkdir -p dist && rm -f dist/*.tar.gz dist/checksums.txt
