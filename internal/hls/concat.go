@@ -10,7 +10,7 @@ import (
 
 // ConcatSegments muxes the downloaded segments into an mp4 at outPath via
 // ffmpeg.
-func ConcatSegments(ctx context.Context, segDir string, totalSegments int, outPath string) (*VideoFile, error) {
+func ConcatSegments(ctx context.Context, segDir string, totalSegments int, codec, outPath string) (*VideoFile, error) {
 	listPath := filepath.Join(filepath.Dir(outPath), ".concat.txt")
 	listFile, err := os.Create(listPath)
 	if err != nil {
@@ -49,5 +49,5 @@ func ConcatSegments(ctx context.Context, segDir string, totalSegments int, outPa
 	if err != nil {
 		return nil, fmt.Errorf("stat mp4: %w", err)
 	}
-	return &VideoFile{Path: outPath, Size: fi.Size()}, nil
+	return &VideoFile{Path: outPath, Size: fi.Size(), Codec: codec}, nil
 }

@@ -31,6 +31,7 @@ type Progress struct {
 	seconds float64
 	speed   float64
 	fails   []string
+	resume  string
 	mu      sync.Mutex
 }
 
@@ -58,6 +59,8 @@ func (p *Progress) Update(ev hls.Event) {
 		if ev.Message != "" && (len(p.fails) == 0 || p.fails[len(p.fails)-1] != ev.Message) {
 			p.fails = append(p.fails, ev.Message)
 		}
+	case hls.EventResume:
+		p.resume = ev.Message
 	}
 }
 
@@ -70,6 +73,26 @@ func (p *Progress) Render() string {
 		return p.renderFFmpeg()
 	}
 	return p.renderSegments()
+}
+
+// RenderLine returns the progress line prefixed to overwrite the current
+// terminal line (carriage return + clear).
+func (p *Progress) RenderLine() string {
+	return "\r\033[K" + p.Render()
+}
+
+// SegmentsUsed reports whether segment-phase progress was recorded.
+func (p *Progress) SegmentsUsed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.total > 0
+}
+
+// ResumeMessage returns the resume event message, if any.
+func (p *Progress) ResumeMessage() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.resume
 }
 
 func (p *Progress) renderSegments() string {

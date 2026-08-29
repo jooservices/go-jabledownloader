@@ -18,8 +18,9 @@ import (
 
 // VideoFile describes a downloaded video on disk.
 type VideoFile struct {
-	Path string
-	Size int64
+	Path  string
+	Size  int64
+	Codec string
 }
 
 // EventKind classifies progress events emitted by the downloader.
@@ -32,6 +33,8 @@ const (
 	EventFFmpeg
 	// EventRetry reports a transient failure that will be retried.
 	EventRetry
+	// EventResume reports that existing segments were found on disk.
+	EventResume
 )
 
 // Event is a progress event. The app layer decides how to render it.
@@ -117,10 +120,10 @@ func (d *Downloader) Download(ctx context.Context, code, hlsURL string) (*VideoF
 	mp4Path := filepath.Join(d.outDir, fmt.Sprintf("%s-%s.mp4", code, codec))
 
 	if pl.Encrypted {
-		return d.downloadDirect(ctx, hlsURL, mp4Path)
+		return d.downloadDirect(ctx, hlsURL, codec, mp4Path)
 	}
 
-	result, err := d.downloadSegments(ctx, pl, mp4Path)
+	result, err := d.downloadSegments(ctx, pl, codec, mp4Path)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +131,7 @@ func (d *Downloader) Download(ctx context.Context, code, hlsURL string) (*VideoF
 		return result, nil
 	}
 
-	return d.downloadDirect(ctx, hlsURL, mp4Path)
+	return d.downloadDirect(ctx, hlsURL, codec, mp4Path)
 }
 
 func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*Playlist, string, error) {
@@ -183,7 +186,7 @@ func (d *Downloader) fetch(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (d *Downloader) downloadDirect(ctx context.Context, hlsURL, mp4Path string) (*VideoFile, error) {
+func (d *Downloader) downloadDirect(ctx context.Context, hlsURL, codec, mp4Path string) (*VideoFile, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, fmt.Errorf("ffmpeg is required")
 	}
@@ -194,7 +197,7 @@ func (d *Downloader) downloadDirect(ctx context.Context, hlsURL, mp4Path string)
 	if err != nil {
 		return nil, fmt.Errorf("stat mp4: %w", err)
 	}
-	return &VideoFile{Path: mp4Path, Size: fi.Size()}, nil
+	return &VideoFile{Path: mp4Path, Size: fi.Size(), Codec: codec}, nil
 }
 
 func (d *Downloader) downloadWithFFmpeg(ctx context.Context, hlsURL, mp4Path string) error {
@@ -278,7 +281,7 @@ func (d *Downloader) downloadWithFFmpeg(ctx context.Context, hlsURL, mp4Path str
 	}
 }
 
-func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, mp4Path string) (*VideoFile, error) {
+func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, mp4Path string) (*VideoFile, error) {
 	segDir := filepath.Join(d.outDir, ".segments")
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create segments dir: %w", err)
@@ -290,6 +293,22 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, mp4Path
 	g, ctx := errgroup.WithContext(ctx)
 
 	var doneSegments, failedSegments, totalBytes int64
+
+	existing := 0
+	for i := range pl.Segments {
+		outPath := filepath.Join(segDir, fmt.Sprintf("seg_%06d.ts", i))
+		if _, err := os.Stat(outPath); err == nil {
+			existing++
+		}
+	}
+	if existing > 0 {
+		d.emit(Event{
+			Kind:    EventResume,
+			Done:    int64(existing),
+			Total:   int64(totalSegments),
+			Message: fmt.Sprintf("%d of %d segments already on disk — resuming", existing, totalSegments),
+		})
+	}
 
 	for i := 0; i < d.workers; i++ {
 		g.Go(func() error {
@@ -341,7 +360,7 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, mp4Path
 		return nil, err
 	}
 
-	result, err := ConcatSegments(ctx, segDir, totalSegments, mp4Path)
+	result, err := ConcatSegments(ctx, segDir, totalSegments, codec, mp4Path)
 	if err != nil {
 		return nil, nil
 	}

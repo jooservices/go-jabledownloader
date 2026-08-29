@@ -31,6 +31,8 @@ var rootFlags struct {
 	yes     bool
 	quiet   bool
 	noColor bool
+	verbose bool
+	force   bool
 }
 
 var latestFlags struct {
@@ -87,6 +89,8 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.yes, "yes", "y", false, "Skip the interactive picker and confirmation prompts")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.quiet, "quiet", "q", false, "Only print the final result")
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.noColor, "no-color", false, "Disable ANSI colors")
+	rootCmd.PersistentFlags().BoolVarP(&rootFlags.verbose, "verbose", "v", false, "Verbose output (URLs, HLS links, codec)")
+	rootCmd.PersistentFlags().BoolVarP(&rootFlags.force, "force", "f", false, "Re-download even if the video file already exists")
 
 	rootCmd.AddGroup(&cobra.Group{ID: "download", Title: "Download:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "discovery", Title: "Discovery:"})
@@ -270,6 +274,9 @@ func baseService() (*app.Service, *telemetry.T, error) {
 			DryRun:  rootFlags.dryRun,
 			Yes:     rootFlags.yes,
 			Quiet:   rootFlags.quiet,
+			Verbose: rootFlags.verbose,
+			Force:   rootFlags.force,
+			TTY:     color,
 			Workers: cfg.WorkerCount,
 			OutDir:  cfg.OutputDir,
 		},
