@@ -9,8 +9,8 @@ and optional OpenTelemetry export to the JOOservices OpenObserve platform.
 
 ## About v4.0.0
 
-This line is a complete rebuild of the archived `jabledownloader` project
-(`archives/JOOservices.2/jabledownloader`): new module path
+This line is a complete rebuild of the previous `jabledownloader` CLI
+(versions up to v3.x): new module path
 `github.com/jooservices/go-jabledownloader`, new architecture, new output
 layout.
 
