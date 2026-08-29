@@ -1,7 +1,7 @@
 # go-jabledownloader — Knowledge Base
 
 > Approved planning baseline for the rebuild of the archived `jabledownloader`
-> CLI. Documentation snapshot: 2026-08-29.
+> CLI. Documentation snapshot: 2026-08-29. First release line: **v4.0.0**.
 
 ## 1. Product decision and verified evidence
 
@@ -9,6 +9,9 @@
 - Product: a CLI that downloads videos from Jable.TV (HLS). Not an SDK, not a
   service.
 - Language baseline: Go 1.25 (workspace standard, see `go-flickr`).
+- Version line: v4.0.0 is the first release of the rebuild. The archived
+  binary line is superseded without a compatibility promise; release asset
+  contract: `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz`.
 - The archived implementation at `archives/JOOservices.2/jabledownloader`
   (module `github.com/vietvu/jabledownloader`, Go 1.26.5) is the behavioral
   reference. Its HLS engine, chromedp scraper, picker and self-update logic
