@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Full rebuild** of the previous `jabledownloader` CLI (versions up to
-  v3.x) as `github.com/jooservices/go-jabledownloader` (Go 1.25). No
+  v3.x) as `github.com/jooservices/go-jabledownloader` (Go 1.26). No
   backward compatibility with the old binary, its config, or its
   `video.mp4` output layout is kept.
 

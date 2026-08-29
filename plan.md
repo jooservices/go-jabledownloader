@@ -5,7 +5,7 @@ Execution increments for the rebuild. Each increment ends with a green
 
 ## Increment 1 — Skeleton (done)
 
-- `go.mod` (module `github.com/jooservices/go-jabledownloader`, Go 1.25)
+- `go.mod` (module `github.com/jooservices/go-jabledownloader`, Go 1.26)
 - Dockerfile (build + runtime with ffmpeg/chromium), Makefile,
   `.golangci.yml`, CI workflow, `.gitignore`, `.env.example`
 - Docs: `knowledge.md`, `implementation.md`, `plan.md`, `README.md`,

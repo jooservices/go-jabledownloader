@@ -9,9 +9,12 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    container: golang:1.25-bookworm
+    container: golang:1.26-bookworm
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install toolchain deps
         run: |
