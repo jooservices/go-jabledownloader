@@ -8,7 +8,7 @@ on:
     branches: [master, develop]
 
 concurrency:
-  group: runner1-go-jabledownloader-${{ github.ref }}
+  group: ci-post-merge-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

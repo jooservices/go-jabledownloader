@@ -7,7 +7,7 @@ on:
       - 'v*.*.*'
 
 concurrency:
-  group: runner1-go-jabledownloader-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
