@@ -3,6 +3,9 @@
 /bin/
 /dist/
 
+# CI caches (user-mapped docker compose)
+/.cache/
+
 # Env & secrets
 .env
 *.local

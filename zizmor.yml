@@ -1,0 +1,7 @@
+# zizmor policy for jooservices/go-jabledownloader workflows.
+# Version tags (@v7) are acceptable; SHA pinning is enforced selectively (e.g. SonarCloud on changed lines).
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin

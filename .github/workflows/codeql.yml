@@ -1,0 +1,142 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+  schedule:
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  analyze-actions:
+    name: Analyze GitHub Actions
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Repair workspace permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
+
+          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
+            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
+            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
+          fi
+
+          if [ -d "${repo_dir}" ]; then
+            echo "Removing Docker artifacts under ${repo_dir} ..."
+            sudo rm -rf \
+              "${repo_dir}/.cache" \
+              "${repo_dir}/bin" \
+              "${repo_dir}/dist" \
+              "${repo_dir}/coverage.out"
+            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
+          fi
+
+          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
+            work_root="$(dirname "${RUNNER_WORKSPACE}")"
+            if [ -d "${work_root}/_temp" ]; then
+              echo "Reclaiming ${work_root}/_temp ..."
+              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+              sudo rm -rf "${work_root}/_temp/pr-diff-range"
+            fi
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+          db-location: ${{ runner.temp }}/codeql_db_actions
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+
+  analyze-go:
+    name: Analyze Go
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Repair workspace permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
+
+          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
+            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
+            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
+          fi
+
+          if [ -d "${repo_dir}" ]; then
+            echo "Removing Docker artifacts under ${repo_dir} ..."
+            sudo rm -rf \
+              "${repo_dir}/.cache" \
+              "${repo_dir}/bin" \
+              "${repo_dir}/dist" \
+              "${repo_dir}/coverage.out"
+            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
+          fi
+
+          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
+            work_root="$(dirname "${RUNNER_WORKSPACE}")"
+            if [ -d "${work_root}/_temp" ]; then
+              echo "Reclaiming ${work_root}/_temp ..."
+              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+              sudo rm -rf "${work_root}/_temp/pr-diff-range"
+            fi
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Extract Go toolchain
+        run: |
+          docker create --name go-toolchain-src golang:1.26-bookworm
+          docker cp go-toolchain-src:/usr/local/go "$RUNNER_TEMP/go-toolchain"
+          docker rm go-toolchain-src
+          echo "$RUNNER_TEMP/go-toolchain/bin" >> "$GITHUB_PATH"
+          echo "GOMODCACHE=$RUNNER_TEMP/go-mod-cache" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/go-build-cache" >> "$GITHUB_ENV"
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: autobuild
+          db-location: ${{ runner.temp }}/codeql_db_go
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
