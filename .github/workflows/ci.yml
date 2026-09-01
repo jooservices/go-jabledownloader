@@ -368,3 +368,25 @@ jobs:
             }
             printf "PASS: coverage %.1f%% meets the %.1f%% floor\n", total, floor
           }'
+
+  ci:
+    name: CI
+    needs: [validate, lint, security, test, coverage]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Aggregate CI result
+        run: |
+          for result in \
+            "${{ needs.validate.result }}" \
+            "${{ needs.lint.result }}" \
+            "${{ needs.security.result }}" \
+            "${{ needs.test.result }}" \
+            "${{ needs.coverage.result }}"; do
+            if [ "${result}" != "success" ]; then
+              echo "CI failed: one or more required jobs did not succeed"
+              exit 1
+            fi
+          done
+          echo "CI passed"
