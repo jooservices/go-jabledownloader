@@ -23,6 +23,15 @@ else
   chown -R "${runner_uid}:${runner_gid}" "${workspace}"
 fi
 
+if [[ -d "${work_root}/_temp" ]]; then
+  echo "Reclaiming ownership under ${work_root}/_temp ..."
+  if [[ "${runner_uid}" -ne 0 ]]; then
+    sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+  else
+    chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+  fi
+fi
+
 if [[ -d "${checkout}" ]]; then
   echo "Removing common root-owned artifact paths under ${checkout} ..."
   rm -rf \
