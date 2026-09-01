@@ -1,32 +1,85 @@
+# Dedicated CI for jooservices/go-jabledownloader — self-hosted runner1 (Linux X64)
+# Pull-request quality gate: full pipeline. Post-merge heads run ci-post-merge.yml.
+# No Codecov/SonarQube: not yet provisioned for this repo.
 name: CI
 
 on:
-  push:
-    branches: [master, develop]
   pull_request:
     branches: [master, develop]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  validate:
+    name: Validate
+    runs-on: [self-hosted, Linux, X64]
     container: golang:1.26-bookworm
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Configure git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Install toolchain deps
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates ffmpeg chromium
-          GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+      - name: Cache Go modules
+        uses: actions/cache@v6
+        id: go-cache
+        with:
+          path: /go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-
 
       - name: Download modules
+        if: steps.go-cache.outputs.cache-hit != 'true'
         run: go mod download
 
       - name: Format check
         run: make fmt-check
+
+      - name: Module integrity
+        run: go mod verify
+
+  lint:
+    name: Lint
+    needs: [validate]
+    runs-on: [self-hosted, Linux, X64]
+    container: golang:1.26-bookworm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@v6
+        id: go-cache
+        with:
+          path: /go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-
+
+      - name: Download modules
+        if: steps.go-cache.outputs.cache-hit != 'true'
+        run: go mod download
+
+      - name: Install golangci-lint
+        run: GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
       - name: Vet
         run: make vet
@@ -34,5 +87,134 @@ jobs:
       - name: Lint
         run: make lint
 
-      - name: Test
-        run: make test
+  security:
+    name: Security (${{ matrix.name }})
+    needs: [lint]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Dependencies
+          - name: Secrets
+          - name: SAST
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Govulncheck
+        if: matrix.name == 'Dependencies'
+        run: |
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/src" \
+            --workdir /src \
+            --volume go-mod-cache:/go/pkg/mod \
+            golang:1.26-bookworm \
+            sh -c 'export GOCACHE=/tmp/gocache; \
+              GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0 && \
+              govulncheck ./...'
+
+      - name: OSV Scanner
+        if: matrix.name == 'Dependencies'
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: |-
+            --recursive
+            .
+
+      - name: Dependency Review
+        if: matrix.name == 'Dependencies'
+        uses: actions/dependency-review-action@v5
+
+      - name: Gitleaks OSS CLI
+        if: matrix.name == 'Secrets'
+        run: |
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/repo:ro" \
+            --workdir /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
+            detect --source . --redact --exit-code 1
+
+      - name: Semgrep (OSS)
+        if: matrix.name == 'SAST'
+        run: |
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/src:ro" \
+            semgrep/semgrep@sha256:67319956da3dcb58baf5b322899c15458e3963e7018a86aeeb5cd224e69cb77a \
+            semgrep scan --config p/golang --error
+
+  test:
+    name: Test
+    needs: [lint]
+    runs-on: [self-hosted, Linux, X64]
+    container: golang:1.26-bookworm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@v6
+        id: go-cache
+        with:
+          path: /go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-
+
+      - name: Download modules
+        if: steps.go-cache.outputs.cache-hit != 'true'
+        run: go mod download
+
+      - name: Run tests with coverage
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
+
+  coverage:
+    name: Coverage
+    needs: [test]
+    runs-on: [self-hosted, Linux, X64]
+    container: golang:1.26-bookworm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage
+          path: build/coverage
+
+      - name: Enforce coverage floor
+        run: |
+          total="$(go tool cover -func=build/coverage/coverage.out | awk '/^total:/{gsub(/%/,"",$NF); print $NF}')"
+          echo "Total coverage: ${total}%"
+          awk -v total="${total}" -v floor=85 'BEGIN {
+            if (total < floor) {
+              printf "FAIL: coverage %.1f%% is below the %.1f%% floor\n", total, floor
+              exit 1
+            }
+            printf "PASS: coverage %.1f%% meets the %.1f%% floor\n", total, floor
+          }'
