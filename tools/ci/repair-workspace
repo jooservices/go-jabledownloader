@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# One-time (or occasional) cleanup for self-hosted runner workspaces.
+# Fixes root-owned Docker artifacts that block actions/checkout git clean.
+set -euo pipefail
+
+repo="${1:-go-jabledownloader}"
+work_root="${RUNNER_WORK_ROOT:-/home/joos/actions-runner/_work}"
+workspace="${work_root}/${repo}"
+checkout="${workspace}/${repo}"
+
+if [[ ! -d "${workspace}" ]]; then
+  echo "Workspace not found: ${workspace}" >&2
+  exit 1
+fi
+
+runner_uid="$(id -u)"
+runner_gid="$(id -g)"
+
+echo "Reclaiming ownership under ${workspace} ..."
+if [[ "${runner_uid}" -ne 0 ]]; then
+  sudo chown -R "${runner_uid}:${runner_gid}" "${workspace}"
+else
+  chown -R "${runner_uid}:${runner_gid}" "${workspace}"
+fi
+
+if [[ -d "${checkout}" ]]; then
+  echo "Removing common root-owned artifact paths under ${checkout} ..."
+  rm -rf \
+    "${checkout}/bin" \
+    "${checkout}/.cache" \
+    "${checkout}/dist" \
+    "${checkout}/coverage.out" 2>/dev/null || true
+fi
+
+echo "Done. Re-run failed workflows on the PR."

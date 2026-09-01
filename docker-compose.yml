@@ -1,0 +1,15 @@
+services:
+  go:
+    build:
+      context: tools/ci
+      dockerfile: Dockerfile
+    image: jooservices/go-jabledownloader:ci
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      GOMODCACHE: /app/.cache/go-mod
+      GOCACHE: /app/.cache/go-build
+      GOLANGCI_LINT_CACHE: /app/.cache/golangci-lint
+    user: "${DOCKER_UID:?Run via tools/ci/docker-compose}:${DOCKER_GID:?Run via tools/ci/docker-compose}"
+    tty: true

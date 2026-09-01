@@ -13,7 +13,7 @@ run: ## Run the CLI (args via ARGS="get jur-001")
 	go run ./cmd/jabledownloader $(ARGS)
 
 fmt: ## Format all Go code
-	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+	gofmt -w $$(find . -name '*.go' -not -path './vendor/*' -not -path './.cache/*')
 
 vet: ## Run go vet
 	go vet ./...
@@ -30,7 +30,7 @@ cover: ## Open HTML coverage report
 ci: fmt-check vet lint test ## All quality gates
 
 fmt-check:
-	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))" || (echo "gofmt required:"; gofmt -l $$(find . -name '*.go' -not -path './vendor/*'); exit 1)
+	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*' -not -path './.cache/*'))" || (echo "gofmt required:"; gofmt -l $$(find . -name '*.go' -not -path './vendor/*' -not -path './.cache/*'); exit 1)
 
 docker-build: ## Build the runtime image
 	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):latest .
@@ -39,12 +39,12 @@ docker-run: ## Run the image (args via ARGS="--help")
 	docker run --rm -v "$$PWD/videos:/data" $(IMAGE):latest $(ARGS)
 
 docker-test: ## Run quality gates inside the build container
-	docker run --rm -v "$$PWD":/src -w /src golang:1.26-bookworm \
-		sh -c "apt-get update >/dev/null 2>&1 && apt-get install -y ca-certificates ffmpeg chromium >/dev/null 2>&1; GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2; make ci"
+	tools/ci/docker-compose build go
+	tools/ci/docker-compose run --rm go make ci
 
 release: ## Cross-compile release archives into dist/
 	@mkdir -p dist && rm -f dist/*.tar.gz dist/checksums.txt
-	docker run --rm -v "$$PWD":/src -w /src -v go-mod-cache:/go/pkg/mod golang:1.26-bookworm sh -c '\
+	tools/ci/docker-compose run --rm go sh -c '\
 		set -e; mkdir -p /tmp/rel; \
 		for os in darwin linux windows; do \
 			for arch in amd64 arm64; do \

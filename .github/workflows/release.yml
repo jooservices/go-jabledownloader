@@ -12,7 +12,6 @@ concurrency:
 
 permissions:
   contents: write
-  security-events: write
   actions: read
 
 jobs:
@@ -20,6 +19,10 @@ jobs:
     name: Release
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
+    permissions:
+      contents: write
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -35,25 +38,17 @@ jobs:
             exit 1
           fi
 
+      - name: Build CI image
+        run: tools/ci/docker-compose build go
+
       - name: Quality gates
         run: |
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/src" \
-            --workdir /src \
-            --volume go-mod-cache:/go/pkg/mod \
-            golang:1.26-bookworm \
-            sh -c 'apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg chromium && \
-              GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 && \
-              make fmt-check && make vet && make lint'
+          tools/ci/docker-compose run --rm go make fmt-check
+          tools/ci/docker-compose run --rm go make vet
+          tools/ci/docker-compose run --rm go make lint
 
       - name: Test with coverage
-        run: |
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/src" \
-            --workdir /src \
-            --volume go-mod-cache:/go/pkg/mod \
-            golang:1.26-bookworm \
-            sh -c 'go test -race -coverprofile=coverage.out ./...'
+        run: tools/ci/docker-compose run --rm go go test -race -coverprofile=coverage.out ./...
 
       - name: Build runtime image
         run: make docker-build VERSION="${GITHUB_REF_NAME#v}"
@@ -99,7 +94,7 @@ jobs:
           output-file: sbom.spdx.json
 
       - name: Build release archives
-        run: make release
+        run: make release VERSION="${GITHUB_REF_NAME#v}"
 
       - name: Install GitHub CLI
         run: |

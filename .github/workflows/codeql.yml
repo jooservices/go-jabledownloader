@@ -14,7 +14,6 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 jobs:
@@ -22,6 +21,10 @@ jobs:
     name: Analyze GitHub Actions
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -41,28 +44,27 @@ jobs:
   analyze-go:
     name: Analyze Go
     runs-on: [self-hosted, Linux, X64]
-    container: golang:1.26-bookworm
     timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Configure git safe.directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache Go modules
-        uses: actions/cache@v6
-        id: go-cache
-        with:
-          path: /go/pkg/mod
-          key: go-mod-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-mod-
+      - name: Extract Go toolchain
+        run: |
+          docker create --name go-toolchain-src golang:1.26-bookworm
+          docker cp go-toolchain-src:/usr/local/go "$RUNNER_TEMP/go-toolchain"
+          docker rm go-toolchain-src
+          echo "$RUNNER_TEMP/go-toolchain/bin" >> "$GITHUB_PATH"
+          echo "GOMODCACHE=$RUNNER_TEMP/go-mod-cache" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/go-build-cache" >> "$GITHUB_ENV"
 
       - name: Download modules
-        if: steps.go-cache.outputs.cache-hit != 'true'
         run: go mod download
 
       - name: Initialize CodeQL
