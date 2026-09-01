@@ -27,7 +27,24 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
     steps:
-      - uses: ./.github/actions/repair-workspace
+      - name: Repair workspace permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
+            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
+            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
+          fi
+          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
+            work_root="$(dirname "${RUNNER_WORKSPACE}")"
+            if [ -d "${work_root}/_temp" ]; then
+              echo "Reclaiming ${work_root}/_temp ..."
+              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+              sudo rm -rf "${work_root}/_temp/pr-diff-range"
+            fi
+          fi
 
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,7 +65,24 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: ./.github/actions/repair-workspace
+      - name: Repair workspace permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
+            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
+            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
+          fi
+          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
+            work_root="$(dirname "${RUNNER_WORKSPACE}")"
+            if [ -d "${work_root}/_temp" ]; then
+              echo "Reclaiming ${work_root}/_temp ..."
+              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+              sudo rm -rf "${work_root}/_temp/pr-diff-range"
+            fi
+          fi
 
       - name: Checkout
         uses: actions/checkout@v7
