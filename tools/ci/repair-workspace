@@ -27,18 +27,30 @@ if [[ -d "${work_root}/_temp" ]]; then
   echo "Reclaiming ownership under ${work_root}/_temp ..."
   if [[ "${runner_uid}" -ne 0 ]]; then
     sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+    sudo rm -rf "${work_root}/_temp/pr-diff-range"
   else
     chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+    rm -rf "${work_root}/_temp/pr-diff-range"
   fi
 fi
 
 if [[ -d "${checkout}" ]]; then
-  echo "Removing common root-owned artifact paths under ${checkout} ..."
-  rm -rf \
-    "${checkout}/bin" \
-    "${checkout}/.cache" \
-    "${checkout}/dist" \
-    "${checkout}/coverage.out" 2>/dev/null || true
+  echo "Removing Docker artifacts under ${checkout} ..."
+  if [[ "${runner_uid}" -ne 0 ]]; then
+    sudo rm -rf \
+      "${checkout}/.cache" \
+      "${checkout}/bin" \
+      "${checkout}/dist" \
+      "${checkout}/coverage.out"
+    sudo chown -R "${runner_uid}:${runner_gid}" "${checkout}"
+  else
+    rm -rf \
+      "${checkout}/.cache" \
+      "${checkout}/bin" \
+      "${checkout}/dist" \
+      "${checkout}/coverage.out"
+    chown -R "${runner_uid}:${runner_gid}" "${checkout}"
+  fi
 fi
 
 echo "Done. Re-run failed workflows on the PR."

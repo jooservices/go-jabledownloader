@@ -9,7 +9,7 @@ on:
     - cron: '0 6 * * 1'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: runner1-go-jabledownloader-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,10 +32,23 @@ jobs:
           set -euo pipefail
           runner_uid="$(id -u)"
           runner_gid="$(id -g)"
+          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
+
           if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
             echo "Reclaiming ${RUNNER_WORKSPACE} ..."
             sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
           fi
+
+          if [ -d "${repo_dir}" ]; then
+            echo "Removing Docker artifacts under ${repo_dir} ..."
+            sudo rm -rf \
+              "${repo_dir}/.cache" \
+              "${repo_dir}/bin" \
+              "${repo_dir}/dist" \
+              "${repo_dir}/coverage.out"
+            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
+          fi
+
           if [ -n "${RUNNER_WORKSPACE:-}" ]; then
             work_root="$(dirname "${RUNNER_WORKSPACE}")"
             if [ -d "${work_root}/_temp" ]; then
@@ -75,10 +88,23 @@ jobs:
           set -euo pipefail
           runner_uid="$(id -u)"
           runner_gid="$(id -g)"
+          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
+
           if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
             echo "Reclaiming ${RUNNER_WORKSPACE} ..."
             sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
           fi
+
+          if [ -d "${repo_dir}" ]; then
+            echo "Removing Docker artifacts under ${repo_dir} ..."
+            sudo rm -rf \
+              "${repo_dir}/.cache" \
+              "${repo_dir}/bin" \
+              "${repo_dir}/dist" \
+              "${repo_dir}/coverage.out"
+            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
+          fi
+
           if [ -n "${RUNNER_WORKSPACE:-}" ]; then
             work_root="$(dirname "${RUNNER_WORKSPACE}")"
             if [ -d "${work_root}/_temp" ]; then
