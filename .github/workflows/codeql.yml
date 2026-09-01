@@ -18,8 +18,27 @@ permissions:
   actions: read
 
 jobs:
-  analyze:
-    name: Analyze GitHub Actions and Go
+  analyze-actions:
+    name: Analyze GitHub Actions
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+
+  analyze-go:
+    name: Analyze Go
     runs-on: [self-hosted, Linux, X64]
     container: golang:1.26-bookworm
     timeout-minutes: 60
@@ -48,7 +67,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: actions, go
+          languages: go
           build-mode: autobuild
 
       - name: Perform CodeQL Analysis
