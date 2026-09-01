@@ -26,10 +26,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - name: Repair runner temp permissions
-        run: |
-          temp_root="$(dirname "${{ runner.temp }}")"
-          sudo chown -R "$(id -u):$(id -g)" "${temp_root}" 2>/dev/null || true
+      - uses: ./.github/actions/repair-workspace
 
       - name: Checkout
         uses: actions/checkout@v7
@@ -55,10 +52,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - name: Repair runner temp permissions
-        run: |
-          temp_root="$(dirname "${{ runner.temp }}")"
-          sudo chown -R "$(id -u):$(id -g)" "${temp_root}" 2>/dev/null || true
+      - uses: ./.github/actions/repair-workspace
 
       - name: Checkout
         uses: actions/checkout@v7

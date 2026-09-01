@@ -22,6 +22,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
     steps:
+      - uses: ./.github/actions/repair-workspace
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -35,9 +37,9 @@ jobs:
         id: go-cache
         with:
           path: .cache
-          key: go-mod-${{ hashFiles('go.sum') }}
+          key: go-cache-v2-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-mod-
+            go-cache-v2-
 
       - name: Download modules
         if: steps.go-cache.outputs.cache-hit != 'true'
@@ -55,6 +57,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
+      - uses: ./.github/actions/repair-workspace
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -68,9 +72,9 @@ jobs:
         id: go-cache
         with:
           path: .cache
-          key: go-mod-${{ hashFiles('go.sum') }}
+          key: go-cache-v2-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-mod-
+            go-cache-v2-
 
       - name: Download modules
         if: steps.go-cache.outputs.cache-hit != 'true'
@@ -95,6 +99,8 @@ jobs:
           - name: Secrets
           - name: SAST
     steps:
+      - uses: ./.github/actions/repair-workspace
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -144,6 +150,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
+      - uses: ./.github/actions/repair-workspace
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -157,9 +165,9 @@ jobs:
         id: go-cache
         with:
           path: .cache
-          key: go-mod-${{ hashFiles('go.sum') }}
+          key: go-cache-v2-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-mod-
+            go-cache-v2-
 
       - name: Download modules
         if: steps.go-cache.outputs.cache-hit != 'true'
@@ -181,6 +189,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
+      - uses: ./.github/actions/repair-workspace
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
