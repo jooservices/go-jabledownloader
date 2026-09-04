@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run docker with the host user mapped in (avoids root-owned artifacts on self-hosted runners).
+# Run docker with the host user mapped in (avoids root-owned artifacts in local/CI workspaces).
 set -euo pipefail
 
 export DOCKER_UID="${DOCKER_UID:-$(id -u)}"
