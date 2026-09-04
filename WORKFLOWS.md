@@ -7,8 +7,6 @@ This document describes the workflows currently defined in
 split into two workflows; branch protection on `master`/`develop` requires the
 pull-request checks before merge.
 
-Codecov and SonarQube are **not** provisioned for this repository yet.
-
 ## Overall event flow
 
 ```mermaid
@@ -62,6 +60,8 @@ flowchart TD
     S --- S1[Dependencies: govulncheck + OSV + Dependency Review]
     S --- S2[Secrets: Gitleaks OSS CLI in pinned Docker image]
     S --- S3[SAST: Semgrep OSS golang]
+    C --- C1[Enforce coverage floor]
+    C --- C2[Upload to Codecov and SonarQube]
 ```
 
 Every Go job builds the CI image, restores Go module caches under `.cache`
@@ -70,16 +70,21 @@ job definition and select their tool via the matrix name. The leaf `CI` job
 aggregates Validate → Lint → Security → Test → Coverage for a single
 branch-protection context when needed.
 
+`CODECOV_TOKEN` and `SONAR_TOKEN` are organization secrets — grant this
+repository access when onboarding. `SONAR_HOST_URL` is optional (defaults to
+`https://sonarcloud.io`). Project key: `jooservices_go-jabledownloader`.
+
 ## Post-merge pass (`ci-post-merge.yml`)
 
 **Trigger:** pushes to `master` or `develop` (i.e., right after a merge).
 
 ```text
-Validate → Test → Coverage
+Validate → Test → Coverage → Codecov + Sonar
 ```
 
 A light sanity pass only: linting and security scanning already gated the
-pull request, so the post-merge run verifies the freshly created merge commit.
+pull request, so the post-merge run verifies the freshly created merge
+commit and refreshes coverage baselines.
 
 ## Release flow (`release.yml`)
 
