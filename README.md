@@ -1,5 +1,8 @@
 # go-jabledownloader
 
+[![CI](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
+[![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
 [![Release](https://img.shields.io/badge/version-4.0.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -138,6 +141,9 @@ fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
+- [SUPPORT.md](SUPPORT.md) / [GOVERNANCE.md](GOVERNANCE.md) /
+  [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [WORKFLOWS.md](WORKFLOWS.md)
 - [knowledge.md](knowledge.md) / [implementation.md](implementation.md) /
   [plan.md](plan.md)
 
@@ -146,19 +152,21 @@ fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
 Docker-only loop; CI runs the same containers:
 
 ```bash
-make ci              # fmt + vet + lint + test
-make cover           # coverage report
+tools/install-git-hooks   # once after clone
+make ci                   # fmt + vet + lint + test
+make cover                # coverage report
 ```
 
 ## Branch model & CI
 
-`master`/`develop`, PR required, CI green before merge — see the workspace
-root `AGENTS.md`. Workflows: `.github/workflows/`.
+`master`/`develop`, PR required, CI green before merge. Workflows:
+`.github/workflows/` — see [WORKFLOWS.md](WORKFLOWS.md).
 
 ## Community
 
 - Issues: https://github.com/jooservices/go-jabledownloader/issues
 - Security: [SECURITY.md](SECURITY.md)
+- Support: [SUPPORT.md](SUPPORT.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License
