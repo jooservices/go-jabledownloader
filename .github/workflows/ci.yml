@@ -1,6 +1,5 @@
 # Dedicated CI for jooservices/go-jabledownloader — self-hosted runner1 (Linux X64)
 # Pull-request quality gate: full pipeline. Post-merge heads run ci-post-merge.yml.
-# No Codecov/SonarQube: not yet provisioned for this repo.
 name: CI
 
 on:
@@ -368,6 +367,44 @@ jobs:
             }
             printf "PASS: coverage %.1f%% meets the %.1f%% floor\n", total, floor
           }'
+
+      - name: Upload to Codecov
+        if: github.event.pull_request.user.type != 'Bot'
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build/coverage/coverage.out
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Resolve SonarQube host URL
+        if: github.event.pull_request.user.type != 'Bot'
+        id: sonar-config
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          set -euo pipefail
+          host_url="${SONAR_HOST_URL:-https://sonarcloud.io}"
+          host_url="${host_url%/}"
+          case "${host_url}" in
+            http://*|https://*) ;;
+            *) host_url="https://${host_url}" ;;
+          esac
+          if [[ ! "${host_url}" =~ ^https?://[^[:space:]/]+ ]]; then
+            echo "SONAR_HOST_URL must be a valid HTTP(S) URL"
+            exit 1
+          fi
+          echo "host_url=${host_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload SonarQube analysis
+        if: github.event.pull_request.user.type != 'Bot'
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ steps.sonar-config.outputs.host_url }}
+        with:
+          args: >
+            -Dsonar.go.coverage.reportPaths=build/coverage/coverage.out
 
   ci:
     name: CI

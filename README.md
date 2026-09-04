@@ -1,6 +1,8 @@
 # go-jabledownloader
 
 [![CI](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jooservices/go-jabledownloader/graph/badge.svg)](https://codecov.io/gh/jooservices/go-jabledownloader)
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
 [![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
 [![Release](https://img.shields.io/badge/version-4.0.0-blue.svg)](CHANGELOG.md)
@@ -161,6 +163,11 @@ make cover                # coverage report
 
 `master`/`develop`, PR required, CI green before merge. Workflows:
 `.github/workflows/` — see [WORKFLOWS.md](WORKFLOWS.md).
+
+**CI secrets (organization level):** `CODECOV_TOKEN` and `SONAR_TOKEN` live
+under [jooservices organization secrets](https://github.com/organizations/jooservices/settings/secrets/actions)
+— not per-repo. `SONAR_HOST_URL` is optional and defaults to
+`https://sonarcloud.io`. Grant this repository access when onboarding.
 
 ## Community
 
