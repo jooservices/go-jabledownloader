@@ -1,4 +1,4 @@
-# Dedicated CI for jooservices/go-jabledownloader — self-hosted runner1 (Linux X64)
+# Dedicated CI for jooservices/go-jabledownloader — GitHub-hosted runners
 # Pull-request quality gate: full pipeline. Post-merge heads run ci-post-merge.yml.
 # No Codecov/SonarQube: not yet provisioned for this repo.
 name: CI
@@ -19,41 +19,9 @@ permissions:
 jobs:
   validate:
     name: Validate
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Repair workspace permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_uid="$(id -u)"
-          runner_gid="$(id -g)"
-          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
-            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
-            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
-          fi
-
-          if [ -d "${repo_dir}" ]; then
-            echo "Removing Docker artifacts under ${repo_dir} ..."
-            sudo rm -rf \
-              "${repo_dir}/.cache" \
-              "${repo_dir}/bin" \
-              "${repo_dir}/dist" \
-              "${repo_dir}/coverage.out"
-            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
-          fi
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
-            work_root="$(dirname "${RUNNER_WORKSPACE}")"
-            if [ -d "${work_root}/_temp" ]; then
-              echo "Reclaiming ${work_root}/_temp ..."
-              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
-              sudo rm -rf "${work_root}/_temp/pr-diff-range"
-            fi
-          fi
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -84,41 +52,9 @@ jobs:
   lint:
     name: Lint
     needs: [validate]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Repair workspace permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_uid="$(id -u)"
-          runner_gid="$(id -g)"
-          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
-            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
-            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
-          fi
-
-          if [ -d "${repo_dir}" ]; then
-            echo "Removing Docker artifacts under ${repo_dir} ..."
-            sudo rm -rf \
-              "${repo_dir}/.cache" \
-              "${repo_dir}/bin" \
-              "${repo_dir}/dist" \
-              "${repo_dir}/coverage.out"
-            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
-          fi
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
-            work_root="$(dirname "${RUNNER_WORKSPACE}")"
-            if [ -d "${work_root}/_temp" ]; then
-              echo "Reclaiming ${work_root}/_temp ..."
-              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
-              sudo rm -rf "${work_root}/_temp/pr-diff-range"
-            fi
-          fi
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -149,7 +85,7 @@ jobs:
   security:
     name: Security (${{ matrix.name }})
     needs: [lint]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: true
@@ -159,38 +95,6 @@ jobs:
           - name: Secrets
           - name: SAST
     steps:
-      - name: Repair workspace permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_uid="$(id -u)"
-          runner_gid="$(id -g)"
-          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
-            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
-            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
-          fi
-
-          if [ -d "${repo_dir}" ]; then
-            echo "Removing Docker artifacts under ${repo_dir} ..."
-            sudo rm -rf \
-              "${repo_dir}/.cache" \
-              "${repo_dir}/bin" \
-              "${repo_dir}/dist" \
-              "${repo_dir}/coverage.out"
-            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
-          fi
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
-            work_root="$(dirname "${RUNNER_WORKSPACE}")"
-            if [ -d "${work_root}/_temp" ]; then
-              echo "Reclaiming ${work_root}/_temp ..."
-              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
-              sudo rm -rf "${work_root}/_temp/pr-diff-range"
-            fi
-          fi
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -237,41 +141,9 @@ jobs:
   test:
     name: Test
     needs: [lint]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Repair workspace permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_uid="$(id -u)"
-          runner_gid="$(id -g)"
-          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
-            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
-            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
-          fi
-
-          if [ -d "${repo_dir}" ]; then
-            echo "Removing Docker artifacts under ${repo_dir} ..."
-            sudo rm -rf \
-              "${repo_dir}/.cache" \
-              "${repo_dir}/bin" \
-              "${repo_dir}/dist" \
-              "${repo_dir}/coverage.out"
-            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
-          fi
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
-            work_root="$(dirname "${RUNNER_WORKSPACE}")"
-            if [ -d "${work_root}/_temp" ]; then
-              echo "Reclaiming ${work_root}/_temp ..."
-              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
-              sudo rm -rf "${work_root}/_temp/pr-diff-range"
-            fi
-          fi
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -306,41 +178,9 @@ jobs:
   coverage:
     name: Coverage
     needs: [test]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Repair workspace permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_uid="$(id -u)"
-          runner_gid="$(id -g)"
-          repo_dir="${RUNNER_WORKSPACE:-}/${GITHUB_REPOSITORY##*/}"
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ] && [ -d "${RUNNER_WORKSPACE}" ]; then
-            echo "Reclaiming ${RUNNER_WORKSPACE} ..."
-            sudo chown -R "${runner_uid}:${runner_gid}" "${RUNNER_WORKSPACE}"
-          fi
-
-          if [ -d "${repo_dir}" ]; then
-            echo "Removing Docker artifacts under ${repo_dir} ..."
-            sudo rm -rf \
-              "${repo_dir}/.cache" \
-              "${repo_dir}/bin" \
-              "${repo_dir}/dist" \
-              "${repo_dir}/coverage.out"
-            sudo chown -R "${runner_uid}:${runner_gid}" "${repo_dir}"
-          fi
-
-          if [ -n "${RUNNER_WORKSPACE:-}" ]; then
-            work_root="$(dirname "${RUNNER_WORKSPACE}")"
-            if [ -d "${work_root}/_temp" ]; then
-              echo "Reclaiming ${work_root}/_temp ..."
-              sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
-              sudo rm -rf "${work_root}/_temp/pr-diff-range"
-            fi
-          fi
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -372,7 +212,7 @@ jobs:
   ci:
     name: CI
     needs: [validate, lint, security, test, coverage]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     if: ${{ !cancelled() }}
     steps:

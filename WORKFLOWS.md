@@ -1,8 +1,8 @@
 # GitHub Actions workflow flow
 
 This document describes the workflows currently defined in
-`.github/workflows/`. Jobs run on the self-hosted Linux X64 runner pool
-(`runner1`); Go commands run through the repository Docker Compose setup
+`.github/workflows/`. All jobs run on GitHub-hosted `ubuntu-latest` runners.
+Go commands run through the repository Docker Compose setup
 (`tools/ci/docker-compose`). The pull-request gate and the post-merge pass are
 split into two workflows; branch protection on `master`/`develop` requires the
 pull-request checks before merge.
@@ -93,18 +93,19 @@ archives under `dist/`.
 
 | Workflow | Trigger | Flow / result |
 | --- | --- | --- |
-| `codeql.yml` | Push/PR on `master` or `develop`; weekly | CodeQL for Actions YAML (`Analyze GitHub Actions`) and Go (`Analyze Go`) |
-| `commitlint.yml` | PR opened/edited/synchronized/reopened | Every PR commit vs `.github/commitlint.config.mjs` |
-| `semantic-pr.yml` | PR opened/edited/synchronized | PR title type + uppercase subject start |
-| `pr-labeler.yml` | PR opened/synchronized/reopened | Labels from `.github/labeler.yml` |
-| `link-check.yml` | Weekly; manual | Lychee Markdown link check |
-| `scorecard.yml` | Push to `master`; weekly; manual | OpenSSF Scorecard → SARIF (GitHub-hosted `ubuntu-latest` for attestation) |
+| `codeql.yml` | Push/PR on `master` or `develop`; Monday 06:00 UTC | CodeQL for Actions YAML (`Analyze GitHub Actions`) and Go (`Analyze Go`) |
+| `commitlint.yml` | PR opened, edited, synchronized, reopened | Every PR commit vs `.github/commitlint.config.mjs` |
+| `semantic-pr.yml` | PR opened, edited, synchronized | PR title type + uppercase subject start |
+| `pr-labeler.yml` | PR opened, synchronized, reopened | Labels from `.github/labeler.yml` |
+| `link-check.yml` | Monday schedule; manual | Lychee Markdown link check |
+| `scorecard.yml` | Push to `master`; Monday schedule; manual | OpenSSF Scorecard → SARIF |
 | `stale.yml` | Daily; manual | Stale issues/PRs |
-| `workflow-audit.yml` | `.github/**` changes; weekly; manual | Actionlint + Zizmor |
+| `workflow-audit.yml` | `.github/**` changes; Monday schedule; manual | Actionlint + Zizmor |
 
 ## Required status checks
 
-Branch protection on `master` and `develop` requires (exact names):
+Branch protection on `master` and `develop` requires (exact names), same shape
+as mature JOOservices packages (`dto` / `client`), adapted to this Go gate:
 
 - `Validate`
 - `Lint`
@@ -118,13 +119,15 @@ Branch protection on `master` and `develop` requires (exact names):
 - `Validate commit messages`
 - `Validate PR Title`
 
-Force pushes and deletions are denied. Admins cannot bypass protection
-(`enforce_admins` is on). Merged head branches are deleted automatically
-(`delete_branch_on_merge`).
+Strict mode requires the branch to be up to date. Force pushes and deletions
+are denied. Admins cannot bypass protection (`enforce_admins` is on). Merged
+head branches are deleted automatically (`delete_branch_on_merge`).
 
-## Runtime truth
+## Notes
 
-Documented runners and Docker paths must match the YAML. Prefer changing the
-workflow files first, then update this document in the same PR. All declared
-workflows use dedicated repository configuration; none use
-`jooservices/workflows`.
+- All jobs use GitHub-hosted `ubuntu-latest`. There is no self-hosted runner pool.
+- All declared workflows use dedicated repository configuration; none use
+  `jooservices/workflows`.
+- Secret scanning has two layers: GitHub Secret Scanning and Push Protection
+  detect or block supported secrets at GitHub, while the pull-request gate
+  scans the checked-out Git history with the MIT-licensed Gitleaks OSS CLI.
