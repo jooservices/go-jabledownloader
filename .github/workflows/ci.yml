@@ -124,7 +124,7 @@ jobs:
       - name: Gitleaks OSS CLI
         if: matrix.name == 'Secrets'
         run: |
-          tools/ci/docker-run \
+          docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/repo:ro" \
             --workdir /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
@@ -133,7 +133,7 @@ jobs:
       - name: Semgrep (OSS)
         if: matrix.name == 'SAST'
         run: |
-          tools/ci/docker-run \
+          docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/src:ro" \
             semgrep/semgrep@sha256:67319956da3dcb58baf5b322899c15458e3963e7018a86aeeb5cd224e69cb77a \
             semgrep scan --config p/golang --error
