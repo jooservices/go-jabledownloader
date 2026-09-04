@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Install project git hooks (commit-msg, pre-commit, pre-push).
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+hooks_src="${root}/tools/git-hooks"
+hooks_dst="${root}/.git/hooks"
+
+if [[ ! -d "${root}/.git" ]]; then
+  echo "error: not a git repository: ${root}" >&2
+  exit 1
+fi
+
+mkdir -p "${hooks_dst}"
+for name in commit-msg pre-commit pre-push; do
+  src="${hooks_src}/${name}"
+  dst="${hooks_dst}/${name}"
+  if [[ ! -f "${src}" ]]; then
+    echo "error: missing ${src}" >&2
+    exit 1
+  fi
+  install -m 0755 "${src}" "${dst}"
+  echo "installed ${dst}"
+done
+
+echo "Git hooks installed. Never use --no-verify."

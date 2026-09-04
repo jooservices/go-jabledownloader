@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Pre-push: Gitleaks on commits since develop (soft-skip if CLI missing), then tests.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "${root}"
+
+default_ref="${JOO_DEFAULT_REF:-origin/develop}"
+if ! git rev-parse --verify "${default_ref}" >/dev/null 2>&1; then
+  default_ref="origin/master"
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --verbose --redact --config=.gitleaks.toml \
+    --log-opts="${default_ref}..HEAD"
+else
+  echo "note: gitleaks not on PATH — skipping local secret scan (CI still scans)"
+fi
+
+if [[ -x tools/ci/docker-compose ]]; then
+  tools/ci/docker-compose run --rm go make test
+else
+  make test
+fi

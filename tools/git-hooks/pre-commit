@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pre-commit: Gitleaks on staged files (soft-skip if CLI missing), then fmt-check.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "${root}"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --verbose --redact --config=.gitleaks.toml
+else
+  echo "note: gitleaks not on PATH — skipping local secret scan (CI still scans)"
+fi
+
+if [[ -x tools/ci/docker-compose ]]; then
+  tools/ci/docker-compose run --rm go make fmt-check
+else
+  make fmt-check
+fi
