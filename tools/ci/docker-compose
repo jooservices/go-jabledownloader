@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run docker compose as the host runner user (avoids root-owned artifacts on self-hosted runners).
+# Run docker compose as the host user (avoids root-owned artifacts in local/CI workspaces).
 set -euo pipefail
 
 export DOCKER_UID="${DOCKER_UID:-$(id -u)}"

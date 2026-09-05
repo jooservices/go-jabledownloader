@@ -17,7 +17,7 @@ permissions:
 jobs:
   validate:
     name: Validate PR Title
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     if: >
       github.actor != 'dependabot[bot]' &&
       !startsWith(github.head_ref, 'dependabot/')
