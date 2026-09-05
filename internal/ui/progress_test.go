@@ -59,8 +59,8 @@ func TestProgressSegmentsFlow(t *testing.T) {
 	if !strings.Contains(rl2, "\033[5A") {
 		t.Fatalf("expected cursor up: %q", rl2)
 	}
-	if clear := ClearBlock(3); !strings.Contains(clear, "\033[3A") {
-		t.Fatalf("ClearBlock: %q", clear)
+	if block := ClearBlock(3); !strings.Contains(block, "\033[3A") {
+		t.Fatalf("ClearBlock: %q", block)
 	}
 
 	sum := p.Summary()
