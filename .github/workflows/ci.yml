@@ -1,6 +1,5 @@
 # Dedicated CI for jooservices/go-jabledownloader — GitHub-hosted runners
 # Pull-request quality gate: full pipeline. Post-merge heads run ci-post-merge.yml.
-# No Codecov/SonarQube: not yet provisioned for this repo.
 name: CI
 
 on:
@@ -128,7 +127,7 @@ jobs:
             --volume "${GITHUB_WORKSPACE}:/repo:ro" \
             --workdir /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
-            detect --source . --redact --exit-code 1
+            detect --source . --redact --exit-code 1 --config=.gitleaks.toml
 
       - name: Semgrep (OSS)
         if: matrix.name == 'SAST'
@@ -208,6 +207,47 @@ jobs:
             }
             printf "PASS: coverage %.1f%% meets the %.1f%% floor\n", total, floor
           }'
+
+      - name: Upload to Codecov
+        if: github.event.pull_request.user.type != 'Bot'
+        continue-on-error: true
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build/coverage/coverage.out
+          # Soft until the Codecov GitHub App includes this repo (install is
+          # "selected" repos). Flip fail_ci_if_error to true after onboarding.
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Resolve SonarQube host URL
+        if: github.event.pull_request.user.type != 'Bot'
+        id: sonar-config
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          set -euo pipefail
+          host_url="${SONAR_HOST_URL:-https://sonarcloud.io}"
+          host_url="${host_url%/}"
+          case "${host_url}" in
+            http://*|https://*) ;;
+            *) host_url="https://${host_url}" ;;
+          esac
+          if [[ ! "${host_url}" =~ ^https?://[^[:space:]/]+ ]]; then
+            echo "SONAR_HOST_URL must be a valid HTTP(S) URL"
+            exit 1
+          fi
+          echo "host_url=${host_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload SonarQube analysis
+        if: github.event.pull_request.user.type != 'Bot'
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ steps.sonar-config.outputs.host_url }}
+        with:
+          args: >
+            -Dsonar.go.coverage.reportPaths=build/coverage/coverage.out
 
   ci:
     name: CI

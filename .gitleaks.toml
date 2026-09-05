@@ -1,0 +1,7 @@
+title = "gitleaks"
+[[allowlists]]
+description = "Allowlisted files"
+paths = [
+  '''(.*?)(png|jpg|gif|svg)$''',
+  '''^go\.sum$''',
+]

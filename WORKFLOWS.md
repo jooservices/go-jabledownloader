@@ -61,25 +61,30 @@ flowchart TD
     S --- S2[Secrets: Gitleaks OSS CLI in pinned Docker image]
     S --- S3[SAST: Semgrep OSS golang]
     C --- C1[Enforce coverage floor]
+    C --- C2[Upload to Codecov and SonarQube]
 ```
 
 Every Go job builds the CI image, restores Go module caches under `.cache`
 (keyed on `go.sum`), then runs its tool. The security matrix legs share the
 job definition and select their tool via the matrix name. The leaf `CI` job
-aggregates Validate → Lint → Security → Test → Coverage. Codecov / SonarQube
-uploads are not wired yet for this repository.
+aggregates Validate → Lint → Security → Test → Coverage for a single
+branch-protection context when needed.
+
+`CODECOV_TOKEN` and `SONAR_TOKEN` are organization secrets — grant this
+repository access when onboarding. `SONAR_HOST_URL` is optional (defaults to
+`https://sonarcloud.io`). Project key: `jooservices_go-jabledownloader`.
 
 ## Post-merge pass (`ci-post-merge.yml`)
 
 **Trigger:** pushes to `master` or `develop` (i.e., right after a merge).
 
 ```text
-Validate → Test → Coverage
+Validate → Test → Coverage → Codecov + Sonar
 ```
 
 A light sanity pass only: linting and security scanning already gated the
 pull request, so the post-merge run verifies the freshly created merge
-commit and refreshes the coverage floor check.
+commit and refreshes coverage baselines.
 
 ## Release flow (`release.yml`)
 
@@ -130,4 +135,7 @@ head branches are deleted automatically (`delete_branch_on_merge`).
   `jooservices/workflows`.
 - Secret scanning has two layers: GitHub Secret Scanning and Push Protection
   detect or block supported secrets at GitHub, while the pull-request gate
-  scans the checked-out Git history with the MIT-licensed Gitleaks OSS CLI.
+  scans the checked-out Git history with the MIT-licensed Gitleaks OSS CLI
+  (`--config=.gitleaks.toml`).
+- Documented runners and Docker paths must match the YAML. Prefer changing the
+  workflow files first, then update this document in the same PR.
