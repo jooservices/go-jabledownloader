@@ -293,14 +293,49 @@ func TestConfigCommandSetGet(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	root.SetArgs([]string{"config", "get", "worker_count"})
-	var buf strings.Builder
-	root.SetOut(&buf)
+	root.SetArgs([]string{"config", "set", "output_dir", "/tmp/jable-out"})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "8" {
-		t.Fatalf("worker_count=%q", got)
+
+	root.SetArgs([]string{"config"})
+	var show strings.Builder
+	root.SetOut(&show)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(show.String(), "worker_count") || !strings.Contains(show.String(), "8") {
+		t.Fatalf("show output: %q", show.String())
+	}
+
+	for _, key := range []string{"worker_count", "output_dir", "path"} {
+		var buf strings.Builder
+		root.SetOut(&buf)
+		root.SetArgs([]string{"config", "get", key})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("get %s: %v", key, err)
+		}
+		if strings.TrimSpace(buf.String()) == "" {
+			t.Fatalf("empty get %s", key)
+		}
+	}
+
+	root.SetOut(io.Discard)
+	root.SetArgs([]string{"config", "get", "nope"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected unknown get key error")
+	}
+	root.SetArgs([]string{"config", "set", "worker_count", "0"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected invalid worker_count error")
+	}
+	root.SetArgs([]string{"config", "set", "output_dir", "  "})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected empty output_dir error")
+	}
+	root.SetArgs([]string{"config", "set", "nope", "x"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected unknown set key error")
 	}
 }
 

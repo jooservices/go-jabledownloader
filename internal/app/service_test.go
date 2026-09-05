@@ -161,6 +161,38 @@ func TestRunGetSkipsExisting(t *testing.T) {
 	}
 }
 
+func TestRunGetSkipsIncompleteWhenSegmentsExist(t *testing.T) {
+	var sb stringsBuilder
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	videoDir := VideoDir(cfg.OutputDir, "pred-840")
+	if err := os.MkdirAll(filepath.Join(videoDir, ".segments"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(videoDir, "pred-840-h264.mp4"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(videoDir, ".segments", "seg_000000.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{
+		Config: cfg,
+		Client: scraper.NewClient(&fileFetcher{file: "video_page.html"}),
+		Out:    ui.NewStdWriter(&sb, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Quiet: true, DryRun: true},
+	}
+	if err := svc.RunGet(context.Background(), "pred-840"); err != nil {
+		t.Fatalf("RunGet: %v", err)
+	}
+	if strings.Contains(sb.String(), "Already downloaded") {
+		t.Fatalf("should not skip incomplete download: %q", sb.String())
+	}
+	if !strings.Contains(sb.String(), "Dry run") {
+		t.Fatalf("expected dry-run after not skipping: %q", sb.String())
+	}
+}
+
 func TestRunMultiDryRun(t *testing.T) {
 	var sb stringsBuilder
 	cfg := config.Defaults()
