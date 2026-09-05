@@ -53,8 +53,8 @@ layout.
 - ffmpeg (runtime, for concat/fallback)
 - Chrome/Chromium (scraping — bypasses Cloudflare)
 - Go 1.26 only when building from source; prebuilt archives need none
-- Docker is optional: required for development/CI, not for running the
-  released binary
+- Docker is preferred for lint/CI; host Go is OK when it matches `go 1.26`.
+  Running the released binary does not require Docker
 
 ## Quick start
 
@@ -150,7 +150,8 @@ assets `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz`.
 
 ## Development
 
-Docker-only loop; CI runs the same containers:
+Prefer Docker so the toolchain matches CI; host Go is OK when it matches
+`go 1.26`:
 
 ```bash
 tools/install-git-hooks   # once after clone
