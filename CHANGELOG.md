@@ -6,6 +6,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-05
+
+### Added
+
+- `--subtitle` embeds English subtitles after download via host `mlx_whisper`
+  (`--task translate`) and ffmpeg
+- `--subtitle-mode soft|hard` — soft (default) = separate `mov_text` track +
+  `.en.srt`; hard = burn-in (requires ffmpeg with libass / `subtitles` filter)
+- `--whisper-model` (default `mlx-community/whisper-medium`)
+- `--spoken-language` (default `ja`; empty for auto-detect)
+- Richer download progress: multi-line bar with segments, downloaded / estimated
+  size, bytes left, current + average speed, elapsed, and ETA
+- `internal/subtitle` package: audio extract, Whisper translate, soft mux / hard
+  burn, English-output validation
+
+### Changed
+
+- Existing-video detection prefers the primary `<code>-<codec>.mp4` and skips
+  derived names such as `*.hard.mp4`
+- Default Whisper model is `whisper-medium` (not `large-v3-turbo`); turbo often
+  ignores `--task translate` and keeps Japanese on Apple MLX
+
+### Fixed
+
+- mlx_whisper SRT naming: `--output-name` must not end in `.en` (Path.with_suffix
+  would strip it); normalize to `<code>-<codec>.en.srt`
+- Reject mostly-Japanese subtitle files so a failed translate cannot be muxed
+  as English
+
 ## [4.1.0] - 2026-09-05
 
 ### Added
@@ -67,5 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `flickrdownloader` leftovers from the self-update package
 - Removed dead scraper endpoints with no CLI command
 
+[4.2.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.2.0
 [4.1.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.1.0
 [4.0.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.0.0

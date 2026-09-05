@@ -22,9 +22,14 @@ func TestFindExistingVideo(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "jur-001-h264.mp4"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Derived hardsub must not win over the primary download.
+	if err := os.WriteFile(filepath.Join(dir, "jur-001-h264.hard.mp4"), []byte("hard"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	if got := FindExistingVideo(dir, "jur-001"); got == "" {
-		t.Fatal("expected existing video to be found")
+	got := FindExistingVideo(dir, "jur-001")
+	if got == "" || filepath.Base(got) != "jur-001-h264.mp4" {
+		t.Fatalf("expected primary h264 mp4, got %q", got)
 	}
 	if got := FindExistingVideo(dir, "jur-002"); got != "" {
 		t.Fatalf("expected no match, got %q", got)

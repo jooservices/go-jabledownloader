@@ -73,15 +73,19 @@ func TestBaseService(t *testing.T) {
 	rootFlags.force = false
 	t.Cleanup(func() {
 		rootFlags = struct {
-			outDir  string
-			workers int
-			dryRun  bool
-			yes     bool
-			quiet   bool
-			noColor bool
-			verbose bool
-			force   bool
-			quality string
+			outDir         string
+			workers        int
+			dryRun         bool
+			yes            bool
+			quiet          bool
+			noColor        bool
+			verbose        bool
+			force          bool
+			quality        string
+			subtitle       bool
+			subtitleMode   string
+			whisperModel   string
+			spokenLanguage string
 		}{}
 	})
 

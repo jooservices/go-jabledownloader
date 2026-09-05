@@ -15,6 +15,7 @@ import (
 	"github.com/jooservices/go-jabledownloader/internal/app"
 	"github.com/jooservices/go-jabledownloader/internal/config"
 	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
 	"github.com/jooservices/go-jabledownloader/internal/update"
@@ -26,15 +27,19 @@ import (
 var version = "dev"
 
 var rootFlags struct {
-	outDir  string
-	workers int
-	dryRun  bool
-	yes     bool
-	quiet   bool
-	noColor bool
-	verbose bool
-	force   bool
-	quality string
+	outDir         string
+	workers        int
+	dryRun         bool
+	yes            bool
+	quiet          bool
+	noColor        bool
+	verbose        bool
+	force          bool
+	quality        string
+	subtitle       bool
+	subtitleMode   string
+	whisperModel   string
+	spokenLanguage string
 }
 
 var searchFlags struct {
@@ -103,6 +108,10 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.verbose, "verbose", "v", false, "Verbose output (URLs, HLS links, codec)")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.force, "force", "f", false, "Re-download even if the video file already exists")
 	rootCmd.PersistentFlags().StringVar(&rootFlags.quality, "quality", "best", "Max video height: best, 360, 480, 720, 1080")
+	rootCmd.PersistentFlags().BoolVar(&rootFlags.subtitle, "subtitle", false, "Embed English subtitles via host mlx_whisper (translate)")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.subtitleMode, "subtitle-mode", "soft", "Subtitle style: soft (separate track) or hard (burn-in)")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.whisperModel, "whisper-model", "", "mlx_whisper model (default: mlx-community/whisper-medium)")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.spokenLanguage, "spoken-language", "ja", "Spoken language hint for Whisper (empty = auto-detect)")
 
 	rootCmd.AddGroup(&cobra.Group{ID: "download", Title: "Download:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "discovery", Title: "Discovery:"})
@@ -125,7 +134,7 @@ func newGetCmd() *cobra.Command {
 		Short:   "Download a single video by URL or code",
 		GroupID: "download",
 		Args:    cobra.ExactArgs(1),
-		Example: "  jabledownloader get jur-827\n  jabledownloader get https://en.jable.tv/videos/jur-827/",
+		Example: "  jabledownloader get jur-827\n  jabledownloader get https://en.jable.tv/videos/jur-827/\n  jabledownloader get abf-382 --subtitle --subtitle-mode soft\n  jabledownloader get abf-382 --subtitle --subtitle-mode hard",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, cleanup, err := newScrapeService(cmd)
 			if err != nil {
@@ -363,6 +372,10 @@ func baseService() (*app.Service, *telemetry.T, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	subtitleMode, err := subtitle.ParseMode(rootFlags.subtitleMode)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	color := ui.ColorEnabled(os.Stdout) && !rootFlags.noColor
 	out := ui.NewStdWriter(os.Stdout, color)
@@ -381,15 +394,19 @@ func baseService() (*app.Service, *telemetry.T, error) {
 		Out:    out,
 		Tel:    tel,
 		Opts: app.Options{
-			DryRun:    rootFlags.dryRun,
-			Yes:       rootFlags.yes,
-			Quiet:     rootFlags.quiet,
-			Verbose:   rootFlags.verbose,
-			Force:     rootFlags.force,
-			TTY:       color,
-			Workers:   cfg.WorkerCount,
-			OutDir:    cfg.OutputDir,
-			MaxHeight: maxHeight,
+			DryRun:         rootFlags.dryRun,
+			Yes:            rootFlags.yes,
+			Quiet:          rootFlags.quiet,
+			Verbose:        rootFlags.verbose,
+			Force:          rootFlags.force,
+			TTY:            color,
+			Workers:        cfg.WorkerCount,
+			OutDir:         cfg.OutputDir,
+			MaxHeight:      maxHeight,
+			Subtitle:       rootFlags.subtitle,
+			SubtitleMode:   subtitleMode,
+			WhisperModel:   rootFlags.whisperModel,
+			SpokenLanguage: rootFlags.spokenLanguage,
 		},
 	}
 	return svc, tel, nil

@@ -5,7 +5,7 @@
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status&branch=develop)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader&branch=develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
 [![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
-[![Release](https://img.shields.io/badge/version-4.1.0-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-4.2.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Download videos from Jable.TV — a single-binary Go CLI with Cloudflare
@@ -31,8 +31,9 @@ layout.
   dependencies in the download core)
 - Output naming `<code>-<codec>.mp4` (e.g. `start-166-h264.mp4`); codec
   resolved from the master playlist
-- Download progress UI: animated segment bar, ffmpeg progress with ETA and
-  speed, resume reporting; newline snapshots when piped
+- Download progress UI: multi-line segment bar with size / left, current + avg
+  speed, ETA; ffmpeg progress; resume reporting; newline snapshots when piped
+- Optional English soft/hard subtitles via host `mlx_whisper` (`--subtitle`)
 - Optional, fail-open OpenTelemetry export to the JOOservices OpenObserve
   platform (`OBS_*` env vars, off by default)
 - CLI UX: `--force`, `--verbose`, `--quiet`, `--no-color`, grouped help,
@@ -47,29 +48,51 @@ layout.
 - `search`, `latest`, `hot` with an interactive multi-select picker and `--count`
 - Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
 - `--quality` to cap height (`best`, `360`, `480`, `720`, `1080`)
+- `--subtitle` — English subtitles via host `mlx_whisper` (`--task translate`)
+- `--subtitle-mode soft|hard` — soft = separate track + `.en.srt`; hard = burn-in
 - `--dry-run` preview with size estimates
 - `config` to persist `output_dir` / `worker_count`
 - Self-update from GitHub releases
 
 ## Requirements
 
-- ffmpeg (runtime, for concat/fallback)
+- ffmpeg (runtime, for concat/fallback; also audio extract + subtitle embed when `--subtitle`)
 - Chrome/Chromium (scraping — bypasses Cloudflare)
+- **Optional (host, `--subtitle` only):** [`mlx-whisper`](https://pypi.org/project/mlx-whisper/) on PATH
+  (Apple Silicon). Install yourself — agents must not install packages:
+  ```bash
+  uv tool install mlx-whisper
+  # or: pipx install mlx-whisper
+  ```
+  Default model: `mlx-community/whisper-medium` (override with `--whisper-model`).
+  Do not use `whisper-large-v3-turbo` for English translate — on MLX it often
+  keeps Japanese. `--subtitle-mode hard` also needs an ffmpeg build with **libass** (`subtitles`
+  filter). Confirm with `ffmpeg -filters | grep subtitles`. Soft mode works
+  without libass.
 - Go 1.26 only when building from source; prebuilt archives need none
 - Docker is preferred for lint/CI; host Go is OK when it matches `go 1.26`.
-  Running the released binary does not require Docker
+  Running the released binary does not require Docker. **Subtitle generation is a
+  host feature** (mlx_whisper / Metal) — do not rely on the project Docker image for it.
 
 ## Quick start
 
 ```bash
 # Prebuilt release archive — no Docker needed:
-tar -xzf jabledownloader_v4.1.0_darwin_arm64.tar.gz
+tar -xzf jabledownloader_v4.2.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 
 jabledownloader get jur-827
+jabledownloader get https://en.jable.tv/videos/abf-382/ --subtitle
+jabledownloader get abf-382 --subtitle --subtitle-mode hard
 jabledownloader search cute --dry-run
 jabledownloader latest --count 5
 ```
+
+English subtitles (`--subtitle`) run on the **host** after the MP4 is ready:
+`ffmpeg` extracts audio → `mlx_whisper --task translate` (default model
+`mlx-community/whisper-medium`, spoken language `ja`) → `.en.srt`, then either
+**soft** mux (`mov_text`, language `eng`; default) or **hard** burn-in (pixels;
+needs ffmpeg with libass).
 
 ## CLI / commands
 

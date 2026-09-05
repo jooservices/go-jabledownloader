@@ -31,13 +31,38 @@ func VideoDir(outDir, code string) string {
 }
 
 // FindExistingVideo reports whether a "<code>-*.mp4" file already exists in
-// dir, returning its path.
+// dir, returning its path. Prefers the primary download
+// ("<code>-<codec>.mp4") and skips derived names like "*.hard.mp4".
 func FindExistingVideo(dir, code string) string {
 	matches, err := filepath.Glob(filepath.Join(dir, code+"-*.mp4"))
 	if err != nil || len(matches) == 0 {
 		return ""
 	}
-	return matches[0]
+	var primary, fallback string
+	prefix := code + "-"
+	for _, m := range matches {
+		base := filepath.Base(m)
+		lower := strings.ToLower(base)
+		if strings.Contains(lower, ".hard.") ||
+			strings.Contains(lower, ".withsubs.") ||
+			strings.HasPrefix(lower, ".") {
+			continue
+		}
+		// Primary layout: <code>-<codec>.mp4 (single hyphen after code, no extra dots in stem).
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		rest := strings.TrimPrefix(stem, prefix)
+		if rest != "" && !strings.Contains(rest, ".") && !strings.Contains(rest, "-") {
+			primary = m
+			break
+		}
+		if fallback == "" {
+			fallback = m
+		}
+	}
+	if primary != "" {
+		return primary
+	}
+	return fallback
 }
 
 // FindCompleteVideo is like FindExistingVideo but returns empty when a
