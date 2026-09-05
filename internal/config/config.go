@@ -26,6 +26,11 @@ func configPath() string {
 	return filepath.Join(configDir(), "config.json")
 }
 
+// Path returns the on-disk config file location.
+func Path() string {
+	return configPath()
+}
+
 // Load reads the config file, returning defaults when it does not exist.
 func Load() (*Config, error) {
 	path := configPath()

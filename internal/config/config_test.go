@@ -54,6 +54,13 @@ func TestLoadExistingFile(t *testing.T) {
 	}
 }
 
+func TestPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if !strings.Contains(Path(), "jabledownloader") {
+		t.Fatalf("Path() = %q", Path())
+	}
+}
+
 func TestSaveAndReload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

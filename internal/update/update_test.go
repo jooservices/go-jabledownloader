@@ -59,13 +59,17 @@ func TestAssetFor(t *testing.T) {
 		{Name: "jabledownloader_v1.0.0_linux_amd64.tar.gz"},
 		{Name: "jabledownloader_v1.0.0_windows_amd64.tar.gz"},
 		{Name: "jabledownloader_v1.0.0_linux_arm64.tar.gz"},
+		{Name: "jabledownloader_v1.0.0_darwin_amd64.tar.gz"},
+		{Name: "jabledownloader_v1.0.0_darwin_arm64.tar.gz"},
+		{Name: "jabledownloader_v1.0.0_windows_arm64.tar.gz"},
 	}}
 	a := rel.AssetFor()
 	if a == nil {
 		t.Fatal("expected an asset for this platform")
 	}
-	if a.Name != "jabledownloader_v1.0.0_linux_arm64.tar.gz" && a.Name != "jabledownloader_v1.0.0_linux_amd64.tar.gz" {
-		t.Fatalf("unexpected asset: %q", a.Name)
+	wantSuffix := "_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	if !strings.HasSuffix(a.Name, wantSuffix) {
+		t.Fatalf("unexpected asset: %q want suffix %q", a.Name, wantSuffix)
 	}
 }
 

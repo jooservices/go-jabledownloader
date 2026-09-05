@@ -42,10 +42,13 @@ layout.
 
 ## Features
 
-- `get` a single video by URL or code (e.g. `jur-827`)
-- `search`, `latest`, `hot` with an interactive multi-select picker
-- Parallel segment downloading with retry/backoff, resume, ffmpeg concat
+- `get` a single video by URL or code (e.g. `jur-827`); skips existing files
+  unless `--force`
+- `search`, `latest`, `hot` with an interactive multi-select picker and `--count`
+- Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
+- `--quality` to cap height (`best`, `360`, `480`, `720`, `1080`)
 - `--dry-run` preview with size estimates
+- `config` to persist `output_dir` / `worker_count`
 - Self-update from GitHub releases
 
 ## Requirements
@@ -73,10 +76,11 @@ jabledownloader latest --count 5
 | Command | Purpose |
 | --- | --- |
 | `jabledownloader get <url\|code>` | Download a single video |
-| `jabledownloader search <query>` | Search and download |
+| `jabledownloader search <query>` | Search and download (`--count`) |
 | `jabledownloader latest` | Download the latest videos (`--count`) |
 | `jabledownloader hot` | Download the trending videos (`--count`) |
 | `jabledownloader update` | Self-update from GitHub releases (`--check`) |
+| `jabledownloader config` | Show or set persisted settings |
 | `jabledownloader completion <shell>` | Shell completion for bash/zsh/fish/powershell |
 
 ## Typical workflow
@@ -96,15 +100,19 @@ for development:
 ```bash
 make build          # host binary into bin/
 make docker-build   # jooservices/go-jabledownloader:latest
-make docker-run     # ARGS="get jur-827"
+make docker-run     # ARGS="get jur-827" (−it, shm-size, CHROME_PATH)
 make release        # cross-compiled archives into dist/
 make ci             # fmt + vet + lint + test (container)
 ```
 
 ## Configuration
 
+Persisted settings live in `~/.config/jabledownloader/config.json`
+(`jabledownloader config` / `config set`).
+
 | Env var | Purpose |
 | --- | --- |
+| `CHROME_PATH` | Chromium/Chrome binary for scraping (Docker sets `/usr/bin/chromium`) |
 | `OBS_ENDPOINT` | OpenObserve URL; unset = telemetry disabled (default) |
 | `OBS_ORG` | OBS organization (default `jooservices`) |
 | `OBS_STREAM` | OBS stream (default `jabledownloader`) |
