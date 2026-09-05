@@ -245,8 +245,8 @@ func TestEmbedEnglishSoftMocked(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		fakeSubtitleTools(t, name, args)
+	commandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		fakeSubtitleTools(t, args)
 		return exec.CommandContext(ctx, "true")
 	}
 
@@ -274,12 +274,12 @@ func TestEmbedEnglishHardMocked(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	commandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "-filters") {
 			return exec.CommandContext(ctx, "sh", "-c", "printf ' .. subtitles  V->V  subtitle'\n")
 		}
-		fakeSubtitleTools(t, name, args)
+		fakeSubtitleTools(t, args)
 		return exec.CommandContext(ctx, "true")
 	}
 
@@ -303,8 +303,8 @@ func TestEmbedEnglishRejectsJapaneseSRT(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		fakeSubtitleToolsJapanese(t, name, args)
+	commandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		fakeSubtitleToolsJapanese(t, args)
 		return exec.CommandContext(ctx, "true")
 	}
 	err := EmbedEnglish(context.Background(), video, Options{Mode: ModeSoft})
@@ -322,7 +322,7 @@ func TestRunWhisperTranslateVerbose(t *testing.T) {
 		t.Fatal(err)
 	}
 	sawVerbose := false
-	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	commandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		for i := 0; i < len(args)-1; i++ {
 			if args[i] == "--verbose" && args[i+1] == "True" {
 				sawVerbose = true
@@ -338,7 +338,7 @@ func TestRunWhisperTranslateVerbose(t *testing.T) {
 	}
 }
 
-func fakeSubtitleTools(t *testing.T, name string, args []string) {
+func fakeSubtitleTools(t *testing.T, args []string) {
 	t.Helper()
 	outName, outDir := "", "."
 	for i := 0; i < len(args)-1; i++ {
@@ -376,7 +376,7 @@ func fakeSubtitleTools(t *testing.T, name string, args []string) {
 	}
 }
 
-func fakeSubtitleToolsJapanese(t *testing.T, name string, args []string) {
+func fakeSubtitleToolsJapanese(t *testing.T, args []string) {
 	t.Helper()
 	outName, outDir := "", "."
 	for i := 0; i < len(args)-1; i++ {
