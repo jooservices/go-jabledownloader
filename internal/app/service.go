@@ -357,7 +357,7 @@ func (s *Service) embedSubtitles(ctx context.Context, videoPath string) error {
 			ui.ColorCyan, ui.IconSpark, mode, ui.ColorReset)
 	}
 	start := time.Now()
-	err = subtitle.EmbedEnglish(ctx, videoPath, subtitle.Options{
+	err = embedEnglish(ctx, videoPath, subtitle.Options{
 		Model:    s.Opts.WhisperModel,
 		Language: s.Opts.SpokenLanguage,
 		Mode:     mode,
@@ -382,6 +382,9 @@ func (s *Service) embedSubtitles(ctx context.Context, videoPath string) error {
 	}
 	return nil
 }
+
+// embedEnglish is the subtitle seam (overridden in tests).
+var embedEnglish = subtitle.EmbedEnglish
 
 // progressDisplay renders the progress block at a fixed interval until stop.
 // On a TTY it overwrites the previous multi-line block. On a non-TTY
