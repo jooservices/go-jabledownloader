@@ -251,7 +251,7 @@ func TestDownloadResumeExistingSegments(t *testing.T) {
 	}
 	// Segment HTTP may still be used if concat falls back to ffmpeg; resume
 	// detection itself is what this test asserts.
-	_ = segHits
+	_ = segHits.Load()
 }
 
 func TestDownloadDirectFallbackSuccess(t *testing.T) {
