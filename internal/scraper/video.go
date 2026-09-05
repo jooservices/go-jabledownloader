@@ -42,7 +42,7 @@ func NewClient(fetcher Fetcher) *Client {
 
 // FetchVideoInfo loads a video page and extracts code, title and HLS URL.
 func (c *Client) FetchVideoInfo(ctx context.Context, videoURL string) (*VideoInfo, error) {
-	htmlContent, err := c.fetcher.FetchHTML(ctx, videoURL)
+	htmlContent, err := c.fetcher.FetchHTML(ctx, videoURL, FetchHLS)
 	if err != nil {
 		return nil, fmt.Errorf("fetch page: %w", err)
 	}
@@ -98,4 +98,13 @@ func ResolveInput(input string) (string, error) {
 		return BaseURL + "/videos/" + input + "/", nil
 	}
 	return "", fmt.Errorf("invalid input: provide a full URL or a video code (e.g. jur-827)")
+}
+
+// CodeFromURL extracts the video code from a Jable video page URL.
+func CodeFromURL(videoURL string) string {
+	m := videoLinkRe.FindStringSubmatch(videoURL)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }

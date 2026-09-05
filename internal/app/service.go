@@ -29,6 +29,7 @@ type Options struct {
 	TTY       bool
 	Workers   int
 	OutDir    string
+	MaxHeight int
 	Count     int
 	CheckOnly bool
 }
@@ -56,6 +57,14 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 		return err
 	}
 
+	if code := scraper.CodeFromURL(videoURL); code != "" && !s.Opts.Force {
+		videoDir := VideoDir(s.Config.OutputDir, code)
+		if existing := FindExistingVideo(videoDir, code); existing != "" {
+			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+			return nil
+		}
+	}
+
 	info, err := s.fetchInfo(ctx, videoURL)
 	if err != nil {
 		return err
@@ -76,6 +85,13 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	if s.Opts.DryRun {
 		s.Out.Printf("  %s%s Dry run — nothing downloaded.%s\n", ui.ColorYellow, ui.IconSpark, ui.ColorReset)
 		return nil
+	}
+
+	if !s.Opts.Force {
+		if existing := FindExistingVideo(videoDir, info.Code); existing != "" {
+			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+			return nil
+		}
 	}
 
 	result, err := s.downloadVideo(ctx, info, videoDir)
@@ -257,6 +273,7 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 
 	dl := hls.NewDownloader(videoDir,
 		hls.WithWorkers(s.Config.WorkerCount),
+		hls.WithMaxHeight(s.Opts.MaxHeight),
 		hls.WithProgress(func(ev hls.Event) {
 			progress.Update(ev)
 			if ev.Kind == hls.EventResume && ev.Message != "" {

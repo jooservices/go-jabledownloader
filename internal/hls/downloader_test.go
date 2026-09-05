@@ -254,7 +254,7 @@ func TestDownloadResumeExistingSegments(t *testing.T) {
 	_ = segHits.Load()
 }
 
-func TestDownloadDirectFallbackSuccess(t *testing.T) {
+func TestDownloadRedownloadsEmptySegment(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not available")
 	}
@@ -266,7 +266,9 @@ func TestDownloadDirectFallbackSuccess(t *testing.T) {
 	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
+	var hits atomic.Int64
 	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
 		_, _ = w.Write(segBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -277,30 +279,69 @@ func TestDownloadDirectFallbackSuccess(t *testing.T) {
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Empty placeholder makes downloadSegment skip and concat fail → ffmpeg direct.
 	if err := os.WriteFile(filepath.Join(segDir, "seg_000000.ts"), []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	var sawFFmpeg atomic.Bool
-	dl := NewDownloader(outDir,
-		WithWorkers(1),
-		WithHTTPClient(srv.Client()),
-		WithProgress(func(ev Event) {
-			if ev.Kind == EventFFmpeg {
-				sawFFmpeg.Store(true)
-			}
-		}),
-	)
-	vf, err := dl.Download(context.Background(), "fb-001", srv.URL+"/media.m3u8")
+	dl := NewDownloader(outDir, WithWorkers(1), WithHTTPClient(srv.Client()))
+	vf, err := dl.Download(context.Background(), "empty-001", srv.URL+"/media.m3u8")
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
 	if vf.Size <= 0 {
 		t.Fatal("expected non-zero mp4")
 	}
-	if !sawFFmpeg.Load() {
-		t.Fatal("expected EventFFmpeg from direct fallback")
+	if hits.Load() < 1 {
+		t.Fatal("expected empty placeholder to be re-downloaded")
+	}
+	if _, err := os.Stat(segDir); !os.IsNotExist(err) {
+		t.Fatalf("expected segments cleaned after success, err=%v", err)
+	}
+}
+
+func TestDownloadKeepsSegmentsOnCancel(t *testing.T) {
+	segBytes := []byte("partial-segment-data-xxxxxxxx")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXTINF:1.0,\nseg1.ts\n#EXT-X-ENDLIST\n")
+	})
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(segBytes)
+	})
+	mux.HandleFunc("/seg1.ts", func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	outDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	dl := NewDownloader(outDir, WithWorkers(1), WithHTTPClient(srv.Client()))
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := dl.Download(ctx, "cancel-001", srv.URL+"/media.m3u8")
+		errCh <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(outDir, ".segments", "seg_000000.ts")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("timed out waiting for first segment")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-errCh; err == nil {
+		t.Fatal("expected cancel error")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, ".segments", "seg_000000.ts")); err != nil {
+		t.Fatalf("expected segments kept after cancel: %v", err)
 	}
 }
 

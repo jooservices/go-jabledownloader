@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -33,6 +34,11 @@ var rootFlags struct {
 	noColor bool
 	verbose bool
 	force   bool
+	quality string
+}
+
+var searchFlags struct {
+	count int
 }
 
 var latestFlags struct {
@@ -65,6 +71,7 @@ func run() int {
 	rootCmd := newRootCmd()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return exitCodeFor(err)
 	}
 	return exitOK
@@ -95,6 +102,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.noColor, "no-color", false, "Disable ANSI colors")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.verbose, "verbose", "v", false, "Verbose output (URLs, HLS links, codec)")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.force, "force", "f", false, "Re-download even if the video file already exists")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.quality, "quality", "best", "Max video height: best, 360, 480, 720, 1080")
 
 	rootCmd.AddGroup(&cobra.Group{ID: "download", Title: "Download:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "discovery", Title: "Discovery:"})
@@ -105,6 +113,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newLatestCmd())
 	rootCmd.AddCommand(newHotCmd())
 	rootCmd.AddCommand(newUpdateCmd())
+	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 
 	return rootCmd
@@ -129,12 +138,12 @@ func newGetCmd() *cobra.Command {
 }
 
 func newSearchCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "search <query>",
 		Short:   "Search and download videos",
 		GroupID: "discovery",
 		Args:    cobra.MinimumNArgs(1),
-		Example: "  jabledownloader search cute",
+		Example: "  jabledownloader search cute\n  jabledownloader search \"cute girl\" --count 5",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, cleanup, err := newScrapeService(cmd)
 			if err != nil {
@@ -142,12 +151,14 @@ func newSearchCmd() *cobra.Command {
 			}
 			defer cleanup()
 			query := strings.Join(args, " ")
-			return svc.RunMulti(cmd.Context(), "search: "+query, latestFlags.count,
+			return svc.RunMulti(cmd.Context(), "search: "+query, searchFlags.count,
 				func(ctx context.Context, page int) ([]scraper.VideoEntry, error) {
 					return svc.Client.SearchVideos(ctx, query, page)
 				})
 		},
 	}
+	cmd.Flags().IntVarP(&searchFlags.count, "count", "n", 10, "Number of videos to download")
+	return cmd
 }
 
 func newLatestCmd() *cobra.Command {
@@ -199,6 +210,94 @@ func newUpdateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&updateFlags.checkOnly, "check", false, "Only check for a newer version, do not install")
 	return cmd
+}
+
+func newConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "config",
+		Short:   "Show or change persisted CLI settings",
+		GroupID: "self",
+		Example: "  jabledownloader config\n  jabledownloader config set output_dir ~/Downloads/jable\n  jabledownloader config set worker_count 8",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runConfigShow(cmd)
+		},
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "get [key]",
+		Short: "Print the config file or one key",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return runConfigShow(cmd)
+			}
+			return runConfigGet(cmd, args[0])
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Persist a config value (output_dir or worker_count)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigSet(cmd, args[0], args[1])
+		},
+	})
+	return cmd
+}
+
+func runConfigShow(cmd *cobra.Command) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  Path:         %s\n", config.Path())
+	fmt.Fprintf(cmd.OutOrStdout(), "  output_dir:   %s\n", cfg.OutputDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "  worker_count: %d\n", cfg.WorkerCount)
+	return nil
+}
+
+func runConfigGet(cmd *cobra.Command, key string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(key) {
+	case "output_dir":
+		fmt.Fprintln(cmd.OutOrStdout(), cfg.OutputDir)
+	case "worker_count":
+		fmt.Fprintln(cmd.OutOrStdout(), cfg.WorkerCount)
+	case "path":
+		fmt.Fprintln(cmd.OutOrStdout(), config.Path())
+	default:
+		return fmt.Errorf("unknown config key %q (supported: output_dir, worker_count, path)", key)
+	}
+	return nil
+}
+
+func runConfigSet(cmd *cobra.Command, key, value string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(key) {
+	case "output_dir":
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("output_dir must not be empty")
+		}
+		cfg.OutputDir = value
+	case "worker_count":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("worker_count must be a positive integer")
+		}
+		cfg.WorkerCount = n
+	default:
+		return fmt.Errorf("unknown config key %q (supported: output_dir, worker_count)", key)
+	}
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  Saved %s=%s to %s\n", key, value, config.Path())
+	return nil
 }
 
 func newCompletionCmd(root *cobra.Command) *cobra.Command {
@@ -260,6 +359,10 @@ func baseService() (*app.Service, *telemetry.T, error) {
 	if rootFlags.outDir != "" {
 		cfg.OutputDir = rootFlags.outDir
 	}
+	maxHeight, err := parseQuality(rootFlags.quality)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	color := ui.ColorEnabled(os.Stdout) && !rootFlags.noColor
 	out := ui.NewStdWriter(os.Stdout, color)
@@ -278,17 +381,31 @@ func baseService() (*app.Service, *telemetry.T, error) {
 		Out:    out,
 		Tel:    tel,
 		Opts: app.Options{
-			DryRun:  rootFlags.dryRun,
-			Yes:     rootFlags.yes,
-			Quiet:   rootFlags.quiet,
-			Verbose: rootFlags.verbose,
-			Force:   rootFlags.force,
-			TTY:     color,
-			Workers: cfg.WorkerCount,
-			OutDir:  cfg.OutputDir,
+			DryRun:    rootFlags.dryRun,
+			Yes:       rootFlags.yes,
+			Quiet:     rootFlags.quiet,
+			Verbose:   rootFlags.verbose,
+			Force:     rootFlags.force,
+			TTY:       color,
+			Workers:   cfg.WorkerCount,
+			OutDir:    cfg.OutputDir,
+			MaxHeight: maxHeight,
 		},
 	}
 	return svc, tel, nil
+}
+
+func parseQuality(raw string) (int, error) {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	if s == "" || s == "best" {
+		return 0, nil
+	}
+	s = strings.TrimSuffix(s, "p")
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid --quality %q (use best, 360, 480, 720, or 1080)", raw)
+	}
+	return n, nil
 }
 
 func envOr(key, fallback string) string {

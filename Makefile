@@ -36,7 +36,7 @@ docker-build: ## Build the runtime image
 	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):latest .
 
 docker-run: ## Run the image (args via ARGS="--help")
-	docker run --rm -v "$$PWD/videos:/data" $(IMAGE):latest $(ARGS)
+	docker run --rm -it --shm-size=2g -v "$$PWD/videos:/data" -e CHROME_PATH=/usr/bin/chromium $(IMAGE):latest $(ARGS)
 
 docker-test: ## Run quality gates inside the build container
 	tools/ci/docker-compose build go

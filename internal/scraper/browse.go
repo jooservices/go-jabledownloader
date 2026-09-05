@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -26,11 +27,11 @@ func (c *Client) HotVideos(ctx context.Context, page int) ([]VideoEntry, error) 
 
 // SearchVideos returns search results for query.
 func (c *Client) SearchVideos(ctx context.Context, query string, page int) ([]VideoEntry, error) {
-	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/search/%s/?page=%d", BaseURL, query, page))
+	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/search/%s/?page=%d", BaseURL, url.PathEscape(query), page))
 }
 
-func (c *Client) fetchBrowsePage(ctx context.Context, url string) ([]VideoEntry, error) {
-	htmlContent, err := c.fetcher.FetchHTML(ctx, url)
+func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]VideoEntry, error) {
+	htmlContent, err := c.fetcher.FetchHTML(ctx, pageURL, FetchReady)
 	if err != nil {
 		return nil, err
 	}

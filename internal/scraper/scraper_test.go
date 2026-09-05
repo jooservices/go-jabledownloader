@@ -13,7 +13,7 @@ type fileFetcher struct {
 	file string
 }
 
-func (f *fileFetcher) FetchHTML(_ context.Context, _ string) (string, error) {
+func (f *fileFetcher) FetchHTML(_ context.Context, _ string, _ FetchMode) (string, error) {
 	data, err := os.ReadFile(filepath.Join("testdata", f.file))
 	if err != nil {
 		return "", err
@@ -27,7 +27,7 @@ type recordingFetcher struct {
 	url  string
 }
 
-func (f *recordingFetcher) FetchHTML(_ context.Context, url string) (string, error) {
+func (f *recordingFetcher) FetchHTML(_ context.Context, url string, _ FetchMode) (string, error) {
 	f.url = url
 	data, err := os.ReadFile(filepath.Join("testdata", f.file))
 	if err != nil {
@@ -138,6 +138,18 @@ func TestSearchVideos(t *testing.T) {
 	}
 }
 
+func TestSearchVideosPathEscapesQuery(t *testing.T) {
+	fetcher := &recordingFetcher{file: "browse_page.html"}
+	c := NewClient(fetcher)
+	if _, err := c.SearchVideos(context.Background(), "cute girl", 2); err != nil {
+		t.Fatalf("SearchVideos: %v", err)
+	}
+	wantURL := BaseURL + "/search/cute%20girl/?page=2"
+	if fetcher.url != wantURL {
+		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
+	}
+}
+
 func TestFetchVideoInfoFetcherError(t *testing.T) {
 	c := NewClient(errFetcher{})
 	_, err := c.FetchVideoInfo(context.Background(), "https://en.jable.tv/videos/x/")
@@ -156,7 +168,7 @@ func TestFetchVideoInfoMissingHLS(t *testing.T) {
 
 type errFetcher struct{}
 
-func (errFetcher) FetchHTML(context.Context, string) (string, error) {
+func (errFetcher) FetchHTML(context.Context, string, FetchMode) (string, error) {
 	return "", fmt.Errorf("boom")
 }
 
@@ -185,5 +197,12 @@ func TestResolveInput(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("ResolveInput(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+
+	if got := CodeFromURL("https://en.jable.tv/videos/jur-827/"); got != "jur-827" {
+		t.Fatalf("CodeFromURL = %q", got)
+	}
+	if got := CodeFromURL("https://example.com/"); got != "" {
+		t.Fatalf("CodeFromURL empty want, got %q", got)
 	}
 }

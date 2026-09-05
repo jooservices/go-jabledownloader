@@ -80,12 +80,23 @@ func WithProgress(fn ProgressFunc) Option {
 	}
 }
 
+// WithMaxHeight selects the best master-playlist variant at or below height
+// (e.g. 720). Zero keeps the previous "highest bandwidth" behavior.
+func WithMaxHeight(height int) Option {
+	return func(d *Downloader) {
+		if height > 0 {
+			d.maxHeight = height
+		}
+	}
+}
+
 // Downloader downloads an HLS stream into an output directory.
 type Downloader struct {
-	outDir   string
-	workers  int
-	client   *http.Client
-	progress ProgressFunc
+	outDir    string
+	workers   int
+	client    *http.Client
+	progress  ProgressFunc
+	maxHeight int
 }
 
 // NewDownloader builds a Downloader for outDir with sensible defaults.
@@ -131,7 +142,11 @@ func (d *Downloader) Download(ctx context.Context, code, hlsURL string) (*VideoF
 		return result, nil
 	}
 
-	return d.downloadDirect(ctx, hlsURL, codec, mp4Path)
+	vf, err := d.downloadDirect(ctx, hlsURL, codec, mp4Path)
+	if err == nil {
+		_ = os.RemoveAll(filepath.Join(d.outDir, ".segments"))
+	}
+	return vf, err
 }
 
 func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*Playlist, string, error) {
@@ -148,7 +163,7 @@ func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*Playl
 		return pl, "h264", err
 	}
 
-	variant, err := ResolveMasterPlaylist(content, baseURL)
+	variant, err := ResolveMasterPlaylist(content, baseURL, d.maxHeight)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve master playlist: %w", err)
 	}
@@ -286,7 +301,6 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, 
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create segments dir: %w", err)
 	}
-	defer os.RemoveAll(segDir)
 
 	totalSegments := len(pl.Segments)
 	jobs := make(chan segmentJob, d.workers*2)
@@ -297,7 +311,7 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, 
 	existing := 0
 	for i := range pl.Segments {
 		outPath := filepath.Join(segDir, fmt.Sprintf("seg_%06d.ts", i))
-		if _, err := os.Stat(outPath); err == nil {
+		if fi, err := os.Stat(outPath); err == nil && fi.Size() > 0 {
 			existing++
 		}
 	}
@@ -356,14 +370,17 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, 
 		return nil
 	})
 
-	if err := g.Wait(); err != nil && err != context.Canceled {
+	if err := g.Wait(); err != nil {
+		// Keep .segments so a later run can resume after cancel/error.
 		return nil, err
 	}
 
 	result, err := ConcatSegments(ctx, segDir, totalSegments, codec, mp4Path)
 	if err != nil {
+		// Fall back to direct ffmpeg; leave segments for a possible retry.
 		return nil, nil
 	}
+	_ = os.RemoveAll(segDir)
 	return result, nil
 }
 
@@ -375,7 +392,7 @@ type segmentJob struct {
 }
 
 func (d *Downloader) downloadSegment(ctx context.Context, url, outPath string) error {
-	if _, err := os.Stat(outPath); err == nil {
+	if fi, err := os.Stat(outPath); err == nil && fi.Size() > 0 {
 		return nil
 	}
 
