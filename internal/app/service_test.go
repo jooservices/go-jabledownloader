@@ -222,7 +222,7 @@ func TestPrintPlanAndSpan(t *testing.T) {
 	_ = ctx
 }
 
-func TestInteractive(t *testing.T) {
+func TestInteractive(_ *testing.T) {
 	_ = interactive()
 }
 
@@ -434,10 +434,10 @@ func startTestHLSServer(t *testing.T) (string, func()) {
 	seg := generateAppTS(t)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(seg)
 	})
 	srv := httptest.NewServer(mux)

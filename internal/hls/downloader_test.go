@@ -43,13 +43,13 @@ func TestDownloadMediaPlaylist(t *testing.T) {
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXTINF:1.0,\nseg1.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(segBytes)
 	})
-	mux.HandleFunc("/seg1.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg1.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(segBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -105,7 +105,7 @@ func TestDownloadMasterPlaylist(t *testing.T) {
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/master.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/master.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS="avc1.4D401E,mp4a.40.2"
 low.m3u8
@@ -113,10 +113,10 @@ low.m3u8
 high.m3u8
 `)
 	})
-	mux.HandleFunc("/high.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/high.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(segBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -134,7 +134,7 @@ high.m3u8
 }
 
 func TestDownloadHTTPErrorHint(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -158,7 +158,7 @@ func TestDownloadEncryptedFallsBackToFFmpeg(t *testing.T) {
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stream.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stream.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		// KEY marks the playlist encrypted so Download uses downloadDirect.
 		fmt.Fprintf(w, `#EXTM3U
 #EXT-X-KEY:METHOD=AES-128,URI="key.bin"
@@ -168,10 +168,10 @@ seg.ts
 #EXT-X-ENDLIST
 `)
 	})
-	mux.HandleFunc("/key.bin", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/key.bin", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(make([]byte, 16))
 	})
-	mux.HandleFunc("/seg.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(segBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -213,11 +213,11 @@ func TestDownloadResumeExistingSegments(t *testing.T) {
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
 	var segHits atomic.Int64
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		segHits.Add(1)
 		_, _ = w.Write(segBytes)
 	})
@@ -263,10 +263,10 @@ func TestDownloadDirectFallbackSuccess(t *testing.T) {
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(segBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -314,10 +314,10 @@ func TestDownloadSegmentRetry(t *testing.T) {
 
 	var hits atomic.Int64
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
 		n := hits.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -347,7 +347,7 @@ func TestDownloadSegmentRetry(t *testing.T) {
 }
 
 func TestFetchStatusWithoutHint(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer srv.Close()
@@ -360,7 +360,7 @@ func TestFetchStatusWithoutHint(t *testing.T) {
 }
 
 func TestDownloadCancelContext(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
 	}))
 	defer srv.Close()
@@ -381,11 +381,11 @@ func TestDownloadSegmentNonRetryable(t *testing.T) {
 	tmp := t.TempDir()
 	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
 	mux := http.NewServeMux()
-	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nok.ts\n#EXTINF:1.0,\nbad.ts\n#EXT-X-ENDLIST\n")
 	})
-	mux.HandleFunc("/ok.ts", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(segBytes) })
-	mux.HandleFunc("/bad.ts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ok.ts", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(segBytes) })
+	mux.HandleFunc("/bad.ts", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 	srv := httptest.NewServer(mux)
@@ -398,13 +398,13 @@ func TestDownloadSegmentNonRetryable(t *testing.T) {
 
 func TestDownloadMasterMediaFail(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/master.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/master.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=1000000,CODECS="avc1.640028,mp4a.40.2"
 high.m3u8
 `)
 	})
-	mux.HandleFunc("/high.m3u8", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/high.m3u8", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	srv := httptest.NewServer(mux)

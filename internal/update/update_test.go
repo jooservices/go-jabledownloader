@@ -127,7 +127,7 @@ func TestLatestRelease(t *testing.T) {
 }
 
 func TestLatestReleaseNotFound(t *testing.T) {
-	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	_, err := LatestRelease(context.Background())
@@ -137,7 +137,7 @@ func TestLatestReleaseNotFound(t *testing.T) {
 }
 
 func TestLatestReleaseBadStatus(t *testing.T) {
-	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	_, err := LatestRelease(context.Background())
@@ -149,7 +149,7 @@ func TestLatestReleaseBadStatus(t *testing.T) {
 func TestDownloadAssetExtractCopy(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("#!/bin/sh\necho ok\n"))
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(archive)
 	}))
@@ -196,7 +196,7 @@ func TestDownloadAssetExtractCopy(t *testing.T) {
 }
 
 func TestDownloadAssetSizeMismatch(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("tiny"))
 	}))
 	defer srv.Close()
@@ -215,7 +215,7 @@ func TestDownloadAssetSizeMismatch(t *testing.T) {
 }
 
 func TestDownloadAssetHTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -255,7 +255,7 @@ func TestExtractBinaryMissing(t *testing.T) {
 }
 
 func TestLatestReleaseBadJSON(t *testing.T) {
-	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("{bad"))
 	}))
 	_, err := LatestRelease(context.Background())
@@ -266,7 +266,7 @@ func TestLatestReleaseBadJSON(t *testing.T) {
 
 func TestInstallLocateError(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("x"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
@@ -287,7 +287,7 @@ func TestInstallLocateError(t *testing.T) {
 func TestInstall(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("#!/bin/sh\necho new\n"))
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
