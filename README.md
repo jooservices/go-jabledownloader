@@ -38,8 +38,7 @@ layout.
 - CLI UX: `--force`, `--verbose`, `--quiet`, `--no-color`, grouped help,
   picker with selection counter, exit codes 0/1/2
 - Repository hygiene: no committed binaries or downloads; Docker-based
-  dev/test/CI; golangci-lint standard; full docs
-  (`knowledge.md` / `implementation.md` / `plan.md`)
+  dev/test/CI; golangci-lint standard
 
 ## Features
 
@@ -134,9 +133,10 @@ Fail-open: an unreachable OBS never affects downloads.
 
 ## Design contract
 
-See `knowledge.md` (design authority) and `implementation.md` (execution
-contract). Key invariants: layered `internal/` packages, pure HLS engine,
-fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
+Project rules live in [AGENTS.md](AGENTS.md). Key invariants: layered
+`internal/` packages, pure HLS engine, fixture-driven scraper tests,
+`<code>-<codec>.mp4` output naming, exit codes `0`/`1`/`2`, and release
+assets `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz`.
 
 ## Documentation
 
@@ -146,8 +146,7 @@ fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
 - [SUPPORT.md](SUPPORT.md) / [GOVERNANCE.md](GOVERNANCE.md) /
   [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [WORKFLOWS.md](WORKFLOWS.md)
-- [knowledge.md](knowledge.md) / [implementation.md](implementation.md) /
-  [plan.md](plan.md)
+- [AGENTS.md](AGENTS.md)
 
 ## Development
 

@@ -25,5 +25,5 @@ with the pinned OSS image and `.gitleaks.toml`.
 make ci    # gofmt check, go vet, golangci-lint, go test -race -cover
 ```
 
-Rules from `implementation.md` apply: pure `internal/hls`, fixture-based
+Rules from [AGENTS.md](AGENTS.md) apply: pure `internal/hls`, fixture-based
 scraper tests, justified dependencies, documented exported API.

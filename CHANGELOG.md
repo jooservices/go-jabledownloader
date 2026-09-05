@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- Rebuild planning docs (`knowledge.md`, `implementation.md`, `plan.md`)
+  after v4.0.0 shipped; durable rules live in `AGENTS.md` and the README.
+
 ## [4.0.0] - 2026-08-29
 
 ### Changed
