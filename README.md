@@ -1,8 +1,8 @@
-# go-jabledownloader
+# jooservices/go-jabledownloader
 
 [![CI](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jooservices/go-jabledownloader/graph/badge.svg)](https://codecov.io/gh/jooservices/go-jabledownloader)
-[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader)
+[![codecov](https://codecov.io/gh/jooservices/go-jabledownloader/graph/badge.svg?branch=develop)](https://codecov.io/gh/jooservices/go-jabledownloader)
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status&branch=develop)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader&branch=develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
 [![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
 [![Release](https://img.shields.io/badge/version-4.0.0-blue.svg)](CHANGELOG.md)

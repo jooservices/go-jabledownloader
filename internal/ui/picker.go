@@ -164,21 +164,30 @@ func (p *picker) redraw() {
 	fmt.Print(b.String())
 }
 
+// Terminal seams — production uses golang.org/x/term; tests override these
+// to exercise the picker without a real TTY.
+var (
+	stdinTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	makeRaw       = term.MakeRaw
+	restoreTerm   = term.Restore
+	terminalSize  = term.GetSize
+)
+
 // PickMulti shows an interactive multi-select list and blocks until the user
 // confirms or cancels. When stdin is not a TTY, the items are returned
 // unchanged. Returns the (possibly edited) items and an error on cancel.
 func PickMulti(title string, items []PickerItem) ([]PickerItem, error) {
-	if len(items) == 0 || !term.IsTerminal(int(os.Stdin.Fd())) {
+	if len(items) == 0 || !stdinTerminal() {
 		return items, nil
 	}
 
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	oldState, err := makeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		return items, nil
 	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	defer func() { _ = restoreTerm(int(os.Stdin.Fd()), oldState) }()
 
-	w, h, err := term.GetSize(int(os.Stdin.Fd()))
+	w, h, err := terminalSize(int(os.Stdin.Fd()))
 	if err != nil || w <= 0 {
 		w = 80
 	}

@@ -220,6 +220,9 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 	}
 }
 
+// newBrowser launches Chrome for scrape commands. Tests override to avoid a live browser.
+var newBrowser = scraper.NewBrowser
+
 // newScrapeService assembles config, telemetry, a Chrome-backed scraper and
 // the app service. The returned cleanup releases the browser.
 func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
@@ -228,7 +231,7 @@ func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
 		return nil, func() {}, err
 	}
 
-	browser, err := scraper.NewBrowser(cmd.Context())
+	browser, err := newBrowser(cmd.Context())
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("launch browser: %w\n\n  Chrome/Chromium is required to bypass Cloudflare protection.\n  Install from: https://www.google.com/chrome/", err)
 	}
@@ -291,6 +294,12 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// Test seams for runUpdate (overridden in tests; production keeps package defaults).
+var (
+	fetchLatestRelease = update.LatestRelease
+	installRelease     = update.Install
+)
+
 func runUpdate(ctx context.Context) error {
 	_, tel, err := baseService()
 	if err != nil {
@@ -298,7 +307,7 @@ func runUpdate(ctx context.Context) error {
 	}
 	defer tel.Shutdown(ctx)
 
-	rel, err := update.LatestRelease(ctx)
+	rel, err := fetchLatestRelease(ctx)
 	if err != nil {
 		return fmt.Errorf("check for updates: %w\n  hint: check your connection; GitHub allows 60 unauthenticated requests/hour", err)
 	}
@@ -327,7 +336,7 @@ func runUpdate(ctx context.Context) error {
 	}
 
 	fmt.Printf("  Downloading %s (%.1f MB)...\n", asset.Name, float64(asset.Size)/1e6)
-	if err := update.Install(ctx, asset); err != nil {
+	if err := installRelease(ctx, asset); err != nil {
 		return err
 	}
 	fmt.Printf("  %s%s Updated to %s%s\n", ui.ColorGreen, ui.IconOk, latest, ui.ColorReset)

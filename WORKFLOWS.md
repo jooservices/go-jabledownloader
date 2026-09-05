@@ -60,7 +60,7 @@ flowchart TD
     S --- S1[Dependencies: govulncheck + OSV + Dependency Review]
     S --- S2[Secrets: Gitleaks OSS CLI in pinned Docker image]
     S --- S3[SAST: Semgrep OSS golang]
-    C --- C1[Enforce coverage floor]
+    C --- C1[Enforce 85% coverage floor]
     C --- C2[Upload to Codecov and SonarQube]
 ```
 
@@ -69,6 +69,8 @@ Every Go job builds the CI image, restores Go module caches under `.cache`
 job definition and select their tool via the matrix name. The leaf `CI` job
 aggregates Validate → Lint → Security → Test → Coverage for a single
 branch-protection context when needed.
+
+Coverage floor is **85%** of statements (`go tool cover -func`).
 
 `CODECOV_TOKEN` and `SONAR_TOKEN` are organization secrets — grant this
 repository access when onboarding. `SONAR_HOST_URL` is optional (defaults to

@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,6 +79,60 @@ func TestBrowseEntries(t *testing.T) {
 	if entries[1].Duration != "10:00" {
 		t.Fatalf("unexpected duration: %q", entries[1].Duration)
 	}
+}
+
+func TestHotVideos(t *testing.T) {
+	c := NewClient(&fileFetcher{file: "browse_page.html"})
+	entries, err := c.HotVideos(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("HotVideos: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+}
+
+func TestBrowseFetcherError(t *testing.T) {
+	c := NewClient(errFetcher{})
+	if _, err := c.LatestVideos(context.Background(), 1); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := c.SearchVideos(context.Background(), "q", 1); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestSearchVideos(t *testing.T) {
+	c := NewClient(&fileFetcher{file: "browse_page.html"})
+	entries, err := c.SearchVideos(context.Background(), "jur", 1)
+	if err != nil {
+		t.Fatalf("SearchVideos: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+}
+
+func TestFetchVideoInfoFetcherError(t *testing.T) {
+	c := NewClient(errFetcher{})
+	_, err := c.FetchVideoInfo(context.Background(), "https://en.jable.tv/videos/x/")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestFetchVideoInfoMissingHLS(t *testing.T) {
+	c := NewClient(&fileFetcher{file: "browse_page.html"})
+	_, err := c.FetchVideoInfo(context.Background(), "https://en.jable.tv/videos/jur-001/")
+	if err == nil {
+		t.Fatal("expected missing HLS error")
+	}
+}
+
+type errFetcher struct{}
+
+func (errFetcher) FetchHTML(context.Context, string) (string, error) {
+	return "", fmt.Errorf("boom")
 }
 
 func TestResolveInput(t *testing.T) {

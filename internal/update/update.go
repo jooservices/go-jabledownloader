@@ -118,6 +118,9 @@ func parseVersion(v string) [3]int {
 	return out
 }
 
+// lookUpExecutable locates the running binary. Tests override it.
+var lookUpExecutable = os.Executable
+
 // Install downloads the asset archive, extracts the binary and atomically
 // replaces the currently running executable (keeping a .old backup until the
 // new binary is in place).
@@ -138,7 +141,7 @@ func Install(ctx context.Context, a *Asset) error {
 		return err
 	}
 
-	exe, err := os.Executable()
+	exe, err := lookUpExecutable()
 	if err != nil {
 		return fmt.Errorf("locate current binary: %w", err)
 	}
