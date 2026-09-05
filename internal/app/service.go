@@ -59,7 +59,7 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 
 	if code := scraper.CodeFromURL(videoURL); code != "" && !s.Opts.Force {
 		videoDir := VideoDir(s.Config.OutputDir, code)
-		if existing := FindExistingVideo(videoDir, code); existing != "" {
+		if existing := FindCompleteVideo(videoDir, code); existing != "" {
 			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
 			return nil
 		}
@@ -88,7 +88,7 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	}
 
 	if !s.Opts.Force {
-		if existing := FindExistingVideo(videoDir, info.Code); existing != "" {
+		if existing := FindCompleteVideo(videoDir, info.Code); existing != "" {
 			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
 			return nil
 		}
@@ -188,7 +188,7 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 		}
 
 		if !s.Opts.Force {
-			if existing := FindExistingVideo(videoDir, entry.Code); existing != "" {
+			if existing := FindCompleteVideo(videoDir, entry.Code); existing != "" {
 				s.Out.Printf("    %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
 				skipped++
 				continue

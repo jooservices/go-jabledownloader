@@ -202,7 +202,10 @@ func TestResolveInput(t *testing.T) {
 	if got := CodeFromURL("https://en.jable.tv/videos/jur-827/"); got != "jur-827" {
 		t.Fatalf("CodeFromURL = %q", got)
 	}
-	if got := CodeFromURL("https://example.com/"); got != "" {
-		t.Fatalf("CodeFromURL empty want, got %q", got)
+	if got := CodeFromURL("https://example.com/videos/pred-840/"); got != "" {
+		t.Fatalf("CodeFromURL foreign host want empty, got %q", got)
+	}
+	if got := CodeFromURL("https://en.jable.tv/videos/not-a-code/"); got != "" {
+		t.Fatalf("CodeFromURL bad code want empty, got %q", got)
 	}
 }

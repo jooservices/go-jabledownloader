@@ -2,6 +2,8 @@ package hls
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,18 +125,18 @@ func (d *Downloader) emit(ev Event) {
 // strategy and falls back to a direct ffmpeg download when the stream is
 // encrypted or concatenation fails.
 func (d *Downloader) Download(ctx context.Context, code, hlsURL string) (*VideoFile, error) {
-	pl, codec, err := d.resolvePlaylist(ctx, hlsURL)
+	stream, err := d.resolvePlaylist(ctx, hlsURL)
 	if err != nil {
 		return nil, fmt.Errorf("resolve playlist: %w", err)
 	}
 
-	mp4Path := filepath.Join(d.outDir, fmt.Sprintf("%s-%s.mp4", code, codec))
+	mp4Path := filepath.Join(d.outDir, fmt.Sprintf("%s-%s.mp4", code, stream.codec))
 
-	if pl.Encrypted {
-		return d.downloadDirect(ctx, hlsURL, codec, mp4Path)
+	if stream.pl.Encrypted {
+		return d.downloadDirect(ctx, stream.mediaURL, stream.codec, mp4Path)
 	}
 
-	result, err := d.downloadSegments(ctx, pl, codec, mp4Path)
+	result, err := d.downloadSegments(ctx, stream.pl, stream.codec, mp4Path)
 	if err != nil {
 		return nil, err
 	}
@@ -142,17 +144,23 @@ func (d *Downloader) Download(ctx context.Context, code, hlsURL string) (*VideoF
 		return result, nil
 	}
 
-	vf, err := d.downloadDirect(ctx, hlsURL, codec, mp4Path)
+	vf, err := d.downloadDirect(ctx, stream.mediaURL, stream.codec, mp4Path)
 	if err == nil {
 		_ = os.RemoveAll(filepath.Join(d.outDir, ".segments"))
 	}
 	return vf, err
 }
 
-func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*Playlist, string, error) {
+type resolvedStream struct {
+	pl       *Playlist
+	codec    string
+	mediaURL string
+}
+
+func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*resolvedStream, error) {
 	body, err := d.fetch(ctx, hlsURL)
 	if err != nil {
-		return nil, "", fmt.Errorf("fetch playlist: %w", err)
+		return nil, fmt.Errorf("fetch playlist: %w", err)
 	}
 	content := string(body)
 
@@ -160,22 +168,28 @@ func (d *Downloader) resolvePlaylist(ctx context.Context, hlsURL string) (*Playl
 
 	if !strings.Contains(content, "#EXT-X-STREAM-INF:") {
 		pl, err := ParsePlaylist(content, baseURL)
-		return pl, "h264", err
+		if err != nil {
+			return nil, err
+		}
+		return &resolvedStream{pl: pl, codec: "h264", mediaURL: hlsURL}, nil
 	}
 
 	variant, err := ResolveMasterPlaylist(content, baseURL, d.maxHeight)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve master playlist: %w", err)
+		return nil, fmt.Errorf("resolve master playlist: %w", err)
 	}
 
 	body2, err := d.fetch(ctx, variant.URL)
 	if err != nil {
-		return nil, "", fmt.Errorf("fetch media playlist: %w", err)
+		return nil, fmt.Errorf("fetch media playlist: %w", err)
 	}
 
 	baseURL2 := variant.URL[:len(variant.URL)-len(filepath.Base(variant.URL))]
 	pl, err := ParsePlaylist(string(body2), baseURL2)
-	return pl, variant.Codec, err
+	if err != nil {
+		return nil, err
+	}
+	return &resolvedStream{pl: pl, codec: variant.Codec, mediaURL: variant.URL}, nil
 }
 
 // fetch performs a GET with status hinting, sharing one code path (DRY).
@@ -205,8 +219,15 @@ func (d *Downloader) downloadDirect(ctx context.Context, hlsURL, codec, mp4Path 
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, fmt.Errorf("ffmpeg is required")
 	}
-	if err := d.downloadWithFFmpeg(ctx, hlsURL, mp4Path); err != nil {
+	partial := filepath.Join(d.outDir, ".download.part.mp4")
+	_ = os.Remove(partial)
+	if err := d.downloadWithFFmpeg(ctx, hlsURL, partial); err != nil {
+		_ = os.Remove(partial)
 		return nil, err
+	}
+	if err := os.Rename(partial, mp4Path); err != nil {
+		_ = os.Remove(partial)
+		return nil, fmt.Errorf("finalize mp4: %w", err)
 	}
 	fi, err := os.Stat(mp4Path)
 	if err != nil {
@@ -297,9 +318,9 @@ func (d *Downloader) downloadWithFFmpeg(ctx context.Context, hlsURL, mp4Path str
 }
 
 func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, mp4Path string) (*VideoFile, error) {
-	segDir := filepath.Join(d.outDir, ".segments")
-	if err := os.MkdirAll(segDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create segments dir: %w", err)
+	segDir, err := d.prepareSegmentDir(pl)
+	if err != nil {
+		return nil, err
 	}
 
 	totalSegments := len(pl.Segments)
@@ -375,13 +396,49 @@ func (d *Downloader) downloadSegments(ctx context.Context, pl *Playlist, codec, 
 		return nil, err
 	}
 
-	result, err := ConcatSegments(ctx, segDir, totalSegments, codec, mp4Path)
+	partial := filepath.Join(d.outDir, ".download.part.mp4")
+	_ = os.Remove(partial)
+	result, err := ConcatSegments(ctx, segDir, totalSegments, codec, partial)
 	if err != nil {
+		_ = os.Remove(partial)
 		// Fall back to direct ffmpeg; leave segments for a possible retry.
 		return nil, nil
 	}
+	if err := os.Rename(partial, mp4Path); err != nil {
+		_ = os.Remove(partial)
+		return nil, fmt.Errorf("finalize mp4: %w", err)
+	}
+	result.Path = mp4Path
 	_ = os.RemoveAll(segDir)
 	return result, nil
+}
+
+func playlistFingerprint(pl *Playlist) string {
+	h := sha256.New()
+	for _, seg := range pl.Segments {
+		_, _ = h.Write([]byte(seg.URL))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// prepareSegmentDir keeps existing segments only when they match the current
+// playlist fingerprint; otherwise it clears and rewrites `.source`.
+func (d *Downloader) prepareSegmentDir(pl *Playlist) (string, error) {
+	segDir := filepath.Join(d.outDir, ".segments")
+	metaPath := filepath.Join(segDir, ".source")
+	want := playlistFingerprint(pl)
+	if data, err := os.ReadFile(metaPath); err == nil && strings.TrimSpace(string(data)) == want {
+		return segDir, nil
+	}
+	_ = os.RemoveAll(segDir)
+	if err := os.MkdirAll(segDir, 0o755); err != nil {
+		return "", fmt.Errorf("create segments dir: %w", err)
+	}
+	if err := os.WriteFile(metaPath, []byte(want+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("write segment source: %w", err)
+	}
+	return segDir, nil
 }
 
 type segmentJob struct {

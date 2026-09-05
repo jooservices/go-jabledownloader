@@ -262,6 +262,7 @@ func TestParseQuality(t *testing.T) {
 		{"", 0, false},
 		{"720", 720, false},
 		{"720p", 720, false},
+		{"481", 0, true},
 		{"nope", 0, true},
 		{"0", 0, true},
 	}

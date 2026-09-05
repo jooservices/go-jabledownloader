@@ -133,6 +133,50 @@ high.m3u8
 	}
 }
 
+func TestDownloadMasterPlaylistMaxHeight(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not available")
+	}
+
+	tmp := t.TempDir()
+	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
+
+	var lowHits, highHits atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("/master.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS="avc1.4D401E,mp4a.40.2"
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
+high.m3u8
+`)
+	})
+	mux.HandleFunc("/low.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		lowHits.Add(1)
+		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
+	})
+	mux.HandleFunc("/high.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		highHits.Add(1)
+		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
+	})
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(segBytes)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dl := NewDownloader(t.TempDir(), WithWorkers(1), WithHTTPClient(srv.Client()), WithMaxHeight(360))
+	if _, err := dl.Download(context.Background(), "qh-001", srv.URL+"/master.m3u8"); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if lowHits.Load() < 1 {
+		t.Fatal("expected low variant media playlist fetch")
+	}
+	if highHits.Load() != 0 {
+		t.Fatal("did not expect high variant when maxHeight=360")
+	}
+}
+
 func TestDownloadHTTPErrorHint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -229,6 +273,13 @@ func TestDownloadResumeExistingSegments(t *testing.T) {
 	if err := os.MkdirAll(segDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	pl, err := ParsePlaylist("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n", srv.URL+"/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segDir, ".source"), []byte(playlistFingerprint(pl)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(segDir, "seg_000000.ts"), segBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -249,9 +300,60 @@ func TestDownloadResumeExistingSegments(t *testing.T) {
 	if resumeMsg == "" {
 		t.Fatal("expected resume event")
 	}
-	// Segment HTTP may still be used if concat falls back to ffmpeg; resume
-	// detection itself is what this test asserts.
 	_ = segHits.Load()
+}
+
+func TestDownloadDiscardsMismatchedSegments(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not available")
+	}
+
+	tmp := t.TempDir()
+	segBytes := generateTS(t, filepath.Join(tmp, "seed.ts"))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
+	})
+	var hits atomic.Int64
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write(segBytes)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	outDir := t.TempDir()
+	segDir := filepath.Join(outDir, ".segments")
+	if err := os.MkdirAll(segDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segDir, ".source"), []byte("stale-fingerprint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segDir, "seg_000000.ts"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var resumeMsg string
+	dl := NewDownloader(outDir,
+		WithWorkers(1),
+		WithHTTPClient(srv.Client()),
+		WithProgress(func(ev Event) {
+			if ev.Kind == EventResume {
+				resumeMsg = ev.Message
+			}
+		}),
+	)
+	if _, err := dl.Download(context.Background(), "fp-001", srv.URL+"/media.m3u8"); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if resumeMsg != "" {
+		t.Fatalf("expected no resume for mismatched fingerprint, got %q", resumeMsg)
+	}
+	if hits.Load() < 1 {
+		t.Fatal("expected segment re-download after fingerprint mismatch")
+	}
 }
 
 func TestDownloadRedownloadsEmptySegment(t *testing.T) {

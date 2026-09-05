@@ -402,7 +402,7 @@ func parseQuality(raw string) (int, error) {
 	}
 	s = strings.TrimSuffix(s, "p")
 	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
+	if err != nil || (n != 360 && n != 480 && n != 720 && n != 1080) {
 		return 0, fmt.Errorf("invalid --quality %q (use best, 360, 480, 720, or 1080)", raw)
 	}
 	return n, nil

@@ -29,6 +29,18 @@ func TestFindExistingVideo(t *testing.T) {
 	if got := FindExistingVideo(dir, "jur-002"); got != "" {
 		t.Fatalf("expected no match, got %q", got)
 	}
+	if got := FindCompleteVideo(dir, "jur-001"); got == "" {
+		t.Fatal("expected complete video without segments")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".segments"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".segments", "seg_000000.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindCompleteVideo(dir, "jur-001"); got != "" {
+		t.Fatalf("expected incomplete when .segments present, got %q", got)
+	}
 }
 
 func TestVideoDir(t *testing.T) {

@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -101,9 +102,18 @@ func ResolveInput(input string) (string, error) {
 }
 
 // CodeFromURL extracts the video code from a Jable video page URL.
+// Non-Jable hosts and malformed codes return an empty string.
 func CodeFromURL(videoURL string) string {
-	m := videoLinkRe.FindStringSubmatch(videoURL)
-	if len(m) < 2 {
+	u, err := url.Parse(videoURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "jable.tv" && !strings.HasSuffix(host, ".jable.tv") {
+		return ""
+	}
+	m := videoLinkRe.FindStringSubmatch(u.Path)
+	if len(m) < 2 || !codeRe.MatchString(m[1]) {
 		return ""
 	}
 	return m[1]
