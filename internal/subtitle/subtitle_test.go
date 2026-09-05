@@ -101,10 +101,15 @@ func TestValidateEnglishSRT(t *testing.T) {
 	dir := t.TempDir()
 	en := filepath.Join(dir, "ok.srt")
 	jp := filepath.Join(dir, "bad.srt")
+	mixed := filepath.Join(dir, "mixed.srt")
 	if err := os.WriteFile(en, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello there\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(jp, []byte("1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// One JP char is OK when English dominates.
+	if err := os.WriteFile(mixed, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello world あ\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateEnglishSRT(en); err != nil {
@@ -112,6 +117,92 @@ func TestValidateEnglishSRT(t *testing.T) {
 	}
 	if err := validateEnglishSRT(jp); err == nil {
 		t.Fatal("expected Japanese rejection")
+	}
+	if err := validateEnglishSRT(mixed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveEnglishSRTPreferredIsDest(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "clip.en.srt")
+	if err := os.WriteFile(dest, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolveEnglishSRT(dest, filepath.Join(dir, "legacy.srt"), dest); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "gone.en.srt")
+	if err := resolveEnglishSRT(missing, filepath.Join(dir, "legacy.srt"), missing); err == nil {
+		t.Fatal("expected missing dest error")
+	}
+}
+
+func TestEmbedEnglishInputErrors(t *testing.T) {
+	origLook := lookPath
+	t.Cleanup(func() { lookPath = origLook })
+
+	if err := EmbedEnglish(context.Background(), "", Options{}); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("empty path: %v", err)
+	}
+	if err := EmbedEnglish(context.Background(), filepath.Join(t.TempDir(), "missing.mp4"), Options{}); err == nil {
+		t.Fatal("expected missing video error")
+	}
+
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	video := filepath.Join(t.TempDir(), "v.mp4")
+	if err := os.WriteFile(video, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EmbedEnglish(context.Background(), video, Options{}); err == nil || !strings.Contains(err.Error(), "ffmpeg") {
+		t.Fatalf("expected ffmpeg missing, got %v", err)
+	}
+
+	lookPath = func(file string) (string, error) {
+		if file == "ffmpeg" {
+			return "/usr/bin/ffmpeg", nil
+		}
+		return "", exec.ErrNotFound
+	}
+	if err := EmbedEnglish(context.Background(), video, Options{}); err == nil || !strings.Contains(err.Error(), "mlx_whisper") {
+		t.Fatalf("expected whisper missing, got %v", err)
+	}
+
+	lookPath = func(file string) (string, error) {
+		if file == "ffmpeg" || file == "mlx_whisper" {
+			return "/usr/bin/" + file, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	if err := EmbedEnglish(context.Background(), video, Options{Mode: "burn"}); err == nil {
+		t.Fatal("expected invalid mode")
+	}
+}
+
+func TestBurnHardSubsMissingFilter(t *testing.T) {
+	origCmd := commandContext
+	t.Cleanup(func() { commandContext = origCmd })
+	commandContext = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if strings.Contains(strings.Join(args, " "), "-filters") {
+			return exec.CommandContext(ctx, "sh", "-c", "printf ' .. overlay  V->V'\n")
+		}
+		return exec.CommandContext(ctx, "false")
+	}
+	err := burnHardSubs(context.Background(), "in.mp4", "a.srt", "out.mp4")
+	if err == nil || !strings.Contains(err.Error(), "libass") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestMuxSoftSubsCommandError(t *testing.T) {
+	origCmd := commandContext
+	t.Cleanup(func() { commandContext = origCmd })
+	commandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "false")
+	}
+	err := muxSoftSubs(context.Background(), "in.mp4", "a.srt", "out.mp4")
+	if err == nil || !strings.Contains(err.Error(), "mux soft") {
+		t.Fatalf("got %v", err)
 	}
 }
 
