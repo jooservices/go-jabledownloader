@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Run docker compose as the host user (avoids root-owned artifacts in local/CI workspaces).
+set -euo pipefail
+
+export DOCKER_UID="${DOCKER_UID:-$(id -u)}"
+export DOCKER_GID="${DOCKER_GID:-$(id -g)}"
+
+exec docker compose "$@"

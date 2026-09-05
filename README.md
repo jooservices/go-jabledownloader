@@ -1,6 +1,11 @@
-# go-jabledownloader
+# jooservices/go-jabledownloader
 
-[![Release](https://img.shields.io/badge/version-4.0.0-blue.svg)](CHANGELOG.md)
+[![CI](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/go-jabledownloader/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jooservices/go-jabledownloader/graph/badge.svg?token=KYCLSJVFPS)](https://codecov.io/gh/jooservices/go-jabledownloader)
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status&branch=develop)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader&branch=develop)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
+[![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
+[![Release](https://img.shields.io/badge/version-4.1.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Download videos from Jable.TV — a single-binary Go CLI with Cloudflare
@@ -33,15 +38,17 @@ layout.
 - CLI UX: `--force`, `--verbose`, `--quiet`, `--no-color`, grouped help,
   picker with selection counter, exit codes 0/1/2
 - Repository hygiene: no committed binaries or downloads; Docker-based
-  dev/test/CI; golangci-lint standard; full docs
-  (`knowledge.md` / `implementation.md` / `plan.md`)
+  dev/test/CI; golangci-lint standard
 
 ## Features
 
-- `get` a single video by URL or code (e.g. `jur-827`)
-- `search`, `latest`, `hot` with an interactive multi-select picker
-- Parallel segment downloading with retry/backoff, resume, ffmpeg concat
+- `get` a single video by URL or code (e.g. `jur-827`); skips existing files
+  unless `--force`
+- `search`, `latest`, `hot` with an interactive multi-select picker and `--count`
+- Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
+- `--quality` to cap height (`best`, `360`, `480`, `720`, `1080`)
 - `--dry-run` preview with size estimates
+- `config` to persist `output_dir` / `worker_count`
 - Self-update from GitHub releases
 
 ## Requirements
@@ -49,14 +56,14 @@ layout.
 - ffmpeg (runtime, for concat/fallback)
 - Chrome/Chromium (scraping — bypasses Cloudflare)
 - Go 1.26 only when building from source; prebuilt archives need none
-- Docker is optional: required for development/CI, not for running the
-  released binary
+- Docker is preferred for lint/CI; host Go is OK when it matches `go 1.26`.
+  Running the released binary does not require Docker
 
 ## Quick start
 
 ```bash
 # Prebuilt release archive — no Docker needed:
-tar -xzf jabledownloader_v4.0.0_darwin_arm64.tar.gz
+tar -xzf jabledownloader_v4.1.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 
 jabledownloader get jur-827
@@ -69,10 +76,11 @@ jabledownloader latest --count 5
 | Command | Purpose |
 | --- | --- |
 | `jabledownloader get <url\|code>` | Download a single video |
-| `jabledownloader search <query>` | Search and download |
+| `jabledownloader search <query>` | Search and download (`--count`) |
 | `jabledownloader latest` | Download the latest videos (`--count`) |
 | `jabledownloader hot` | Download the trending videos (`--count`) |
 | `jabledownloader update` | Self-update from GitHub releases (`--check`) |
+| `jabledownloader config` | Show or set persisted settings |
 | `jabledownloader completion <shell>` | Shell completion for bash/zsh/fish/powershell |
 
 ## Typical workflow
@@ -92,15 +100,19 @@ for development:
 ```bash
 make build          # host binary into bin/
 make docker-build   # jooservices/go-jabledownloader:latest
-make docker-run     # ARGS="get jur-827"
+make docker-run     # ARGS="get jur-827" (−it, shm-size, CHROME_PATH)
 make release        # cross-compiled archives into dist/
 make ci             # fmt + vet + lint + test (container)
 ```
 
 ## Configuration
 
+Persisted settings live in `~/.config/jabledownloader/config.json`
+(`jabledownloader config` / `config set`).
+
 | Env var | Purpose |
 | --- | --- |
+| `CHROME_PATH` | Chromium/Chrome binary for scraping (Docker sets `/usr/bin/chromium`) |
 | `OBS_ENDPOINT` | OpenObserve URL; unset = telemetry disabled (default) |
 | `OBS_ORG` | OBS organization (default `jooservices`) |
 | `OBS_STREAM` | OBS stream (default `jabledownloader`) |
@@ -129,36 +141,47 @@ Fail-open: an unreachable OBS never affects downloads.
 
 ## Design contract
 
-See `knowledge.md` (design authority) and `implementation.md` (execution
-contract). Key invariants: layered `internal/` packages, pure HLS engine,
-fixture-driven scraper tests, `<code>-<codec>.mp4` output naming.
+Project rules live in [AGENTS.md](AGENTS.md). Key invariants: layered
+`internal/` packages, pure HLS engine, fixture-driven scraper tests,
+`<code>-<codec>.mp4` output naming, exit codes `0`/`1`/`2`, and release
+assets `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz`.
 
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
-- [knowledge.md](knowledge.md) / [implementation.md](implementation.md) /
-  [plan.md](plan.md)
+- [SUPPORT.md](SUPPORT.md) / [GOVERNANCE.md](GOVERNANCE.md) /
+  [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [WORKFLOWS.md](WORKFLOWS.md)
+- [AGENTS.md](AGENTS.md)
 
 ## Development
 
-Docker-only loop; CI runs the same containers:
+Prefer Docker so the toolchain matches CI; host Go is OK when it matches
+`go 1.26`:
 
 ```bash
-make ci              # fmt + vet + lint + test
-make cover           # coverage report
+tools/install-git-hooks   # once after clone
+make ci                   # fmt + vet + lint + test
+make cover                # coverage report
 ```
 
 ## Branch model & CI
 
-`master`/`develop`, PR required, CI green before merge — see the workspace
-root `AGENTS.md`. Workflows: `.github/workflows/`.
+`master`/`develop`, PR required, CI green before merge. Workflows:
+`.github/workflows/` — see [WORKFLOWS.md](WORKFLOWS.md).
+
+**CI secrets (organization level):** `CODECOV_TOKEN` and `SONAR_TOKEN` live
+under [jooservices organization secrets](https://github.com/organizations/jooservices/settings/secrets/actions)
+— not per-repo. `SONAR_HOST_URL` is optional and defaults to
+`https://sonarcloud.io`. Grant this repository access when onboarding.
 
 ## Community
 
 - Issues: https://github.com/jooservices/go-jabledownloader/issues
 - Security: [SECURITY.md](SECURITY.md)
+- Support: [SUPPORT.md](SUPPORT.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License

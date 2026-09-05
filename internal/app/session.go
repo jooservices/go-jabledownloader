@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -37,6 +38,33 @@ func FindExistingVideo(dir, code string) string {
 		return ""
 	}
 	return matches[0]
+}
+
+// FindCompleteVideo is like FindExistingVideo but returns empty when a
+// resumable `.segments` directory is present (download may be incomplete).
+func FindCompleteVideo(dir, code string) string {
+	existing := FindExistingVideo(dir, code)
+	if existing == "" {
+		return ""
+	}
+	if hasResumeState(dir) {
+		return ""
+	}
+	return existing
+}
+
+func hasResumeState(dir string) bool {
+	entries, err := os.ReadDir(filepath.Join(dir, ".segments"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "seg_") || name == ".source" {
+			return true
+		}
+	}
+	return false
 }
 
 // Plan is a resolved video ready for download.

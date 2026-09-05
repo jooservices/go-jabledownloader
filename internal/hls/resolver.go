@@ -16,9 +16,23 @@ type Variant struct {
 	Codec      string
 }
 
-// ResolveMasterPlaylist parses a master playlist and returns the variant
-// with the highest bandwidth.
-func ResolveMasterPlaylist(content string, baseURL string) (*Variant, error) {
+// ResolveMasterPlaylist parses a master playlist and returns a variant.
+// When maxHeight > 0, it prefers the highest-bandwidth variant whose height
+// is at or below maxHeight; if none fit, it picks the lowest-height variant.
+// When maxHeight is 0, it picks the highest bandwidth overall.
+func ResolveMasterPlaylist(content string, baseURL string, maxHeight int) (*Variant, error) {
+	variants, err := parseMasterVariants(content, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	best := selectVariant(variants, maxHeight)
+	if best.Codec == "" {
+		best.Codec = "h264"
+	}
+	return &best, nil
+}
+
+func parseMasterVariants(content, baseURL string) ([]Variant, error) {
 	var variants []Variant
 	scanner := bufio.NewScanner(strings.NewReader(content))
 
@@ -73,18 +87,51 @@ func ResolveMasterPlaylist(content string, baseURL string) (*Variant, error) {
 	if len(variants) == 0 {
 		return nil, fmt.Errorf("no variants found in master playlist")
 	}
+	return variants, nil
+}
 
-	best := variants[0]
-	for _, v := range variants {
-		if v.Bandwidth > best.Bandwidth {
-			best = v
+func selectVariant(variants []Variant, maxHeight int) Variant {
+	if maxHeight <= 0 {
+		best := variants[0]
+		for _, v := range variants[1:] {
+			if v.Bandwidth > best.Bandwidth {
+				best = v
+			}
+		}
+		return best
+	}
+
+	bestFit := -1
+	lowest := 0
+	lowestH := 0
+	for i, v := range variants {
+		h := heightFromResolution(v.Resolution)
+		if i == 0 || (h > 0 && (lowestH == 0 || h < lowestH)) {
+			lowest = i
+			lowestH = h
+		}
+		if h > 0 && h <= maxHeight {
+			if bestFit < 0 || v.Bandwidth > variants[bestFit].Bandwidth {
+				bestFit = i
+			}
 		}
 	}
-	if best.Codec == "" {
-		best.Codec = "h264"
+	if bestFit >= 0 {
+		return variants[bestFit]
 	}
+	return variants[lowest]
+}
 
-	return &best, nil
+func heightFromResolution(res string) int {
+	parts := strings.Split(res, "x")
+	if len(parts) != 2 {
+		return 0
+	}
+	h, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+	return h
 }
 
 // codecFromAttribute maps the quoted CODECS value (e.g. "avc1.640028,mp4a.40.2")

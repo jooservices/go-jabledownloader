@@ -11,7 +11,7 @@ high.m3u8
 #EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=960x540,CODECS="avc1.4D401F,mp4a.40.2"
 mid.m3u8
 `
-	v, err := ResolveMasterPlaylist(content, "https://cdn.example.com/master/")
+	v, err := ResolveMasterPlaylist(content, "https://cdn.example.com/master/", 0)
 	if err != nil {
 		t.Fatalf("ResolveMasterPlaylist: %v", err)
 	}
@@ -46,8 +46,34 @@ func TestResolveMasterPlaylistCodecMapping(t *testing.T) {
 }
 
 func TestResolveMasterPlaylistNoVariants(t *testing.T) {
-	_, err := ResolveMasterPlaylist("#EXTM3U\n", "https://cdn.example.com/")
+	_, err := ResolveMasterPlaylist("#EXTM3U\n", "https://cdn.example.com/", 0)
 	if err == nil {
 		t.Fatal("expected error for empty master playlist")
+	}
+}
+
+func TestResolveMasterPlaylistMaxHeight(t *testing.T) {
+	content := `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS="avc1.4D401E,mp4a.40.2"
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
+high.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=960x540,CODECS="avc1.4D401F,mp4a.40.2"
+mid.m3u8
+`
+	v, err := ResolveMasterPlaylist(content, "https://cdn.example.com/master/", 540)
+	if err != nil {
+		t.Fatalf("ResolveMasterPlaylist: %v", err)
+	}
+	if v.URL != "https://cdn.example.com/master/mid.m3u8" {
+		t.Fatalf("expected mid variant for maxHeight=540, got %q", v.URL)
+	}
+
+	v, err = ResolveMasterPlaylist(content, "https://cdn.example.com/master/", 240)
+	if err != nil {
+		t.Fatalf("ResolveMasterPlaylist: %v", err)
+	}
+	if v.URL != "https://cdn.example.com/master/low.m3u8" {
+		t.Fatalf("expected lowest when none fit, got %q", v.URL)
 	}
 }

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Conventional Commits: type: Subject (uppercase first letter of subject).
+set -euo pipefail
+
+msg_file="${1:-}"
+if [[ -z "${msg_file}" || ! -f "${msg_file}" ]]; then
+  echo "error: commit-msg hook expects a message file" >&2
+  exit 1
+fi
+
+subject="$(sed -n '1p' "${msg_file}" | tr -d '\r')"
+
+# Allow merge / revert subjects produced by git itself.
+if [[ "${subject}" =~ ^Merge\  ]] || [[ "${subject}" =~ ^Revert\  ]]; then
+  exit 0
+fi
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._-]+\))?!?: [A-Z].+'
+if [[ ! "${subject}" =~ ${pattern} ]]; then
+  cat >&2 <<'EOF'
+error: commit subject must be Conventional Commits with an uppercase subject start.
+Example: feat: Add dry-run size estimates
+EOF
+  exit 1
+fi

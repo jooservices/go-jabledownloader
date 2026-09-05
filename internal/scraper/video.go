@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -42,7 +43,7 @@ func NewClient(fetcher Fetcher) *Client {
 
 // FetchVideoInfo loads a video page and extracts code, title and HLS URL.
 func (c *Client) FetchVideoInfo(ctx context.Context, videoURL string) (*VideoInfo, error) {
-	htmlContent, err := c.fetcher.FetchHTML(ctx, videoURL)
+	htmlContent, err := c.fetcher.FetchHTML(ctx, videoURL, FetchHLS)
 	if err != nil {
 		return nil, fmt.Errorf("fetch page: %w", err)
 	}
@@ -98,4 +99,22 @@ func ResolveInput(input string) (string, error) {
 		return BaseURL + "/videos/" + input + "/", nil
 	}
 	return "", fmt.Errorf("invalid input: provide a full URL or a video code (e.g. jur-827)")
+}
+
+// CodeFromURL extracts the video code from a Jable video page URL.
+// Non-Jable hosts and malformed codes return an empty string.
+func CodeFromURL(videoURL string) string {
+	u, err := url.Parse(videoURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "jable.tv" && !strings.HasSuffix(host, ".jable.tv") {
+		return ""
+	}
+	m := videoLinkRe.FindStringSubmatch(u.Path)
+	if len(m) < 2 || !codeRe.MatchString(m[1]) {
+		return ""
+	}
+	return m[1]
 }

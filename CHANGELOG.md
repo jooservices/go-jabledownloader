@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [4.1.0] - 2026-09-05
+
+### Added
+
+- `search --count` / `-n` (parity with `latest` / `hot`)
+- `--quality` (`best`, `360`, `480`, `720`, `1080`) to cap master-playlist height
+- `config` / `config get` / `config set` for `output_dir` and `worker_count`
+- Docker `make docker-run` uses `-it`, `--shm-size=2g`, and `CHROME_PATH`
+
+### Changed
+
+- Listing scrapes no longer wait for player `hlsUrl` (~15s); video pages still do
+- Interrupted segment downloads keep `.segments` for true resume across runs
+- Empty segment placeholders are re-downloaded instead of treated as complete
+- Search queries are path-escaped (spaces and special characters)
+- `get` skips an existing `<code>-*.mp4` unless `--force` is set
+- Chrome honors `CHROME_PATH` when launching chromedp
+
+### Fixed
+
+- CLI errors print to stderr (exits were previously silent with `SilenceErrors`)
+
+### Removed
+
+- Rebuild planning docs (`knowledge.md`, `implementation.md`, `plan.md`)
+  after v4.0.0 shipped; durable rules live in `AGENTS.md` and the README.
+
 ## [4.0.0] - 2026-08-29
 
 ### Changed
@@ -38,4 +67,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `flickrdownloader` leftovers from the self-update package
 - Removed dead scraper endpoints with no CLI command
 
+[4.1.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.1.0
 [4.0.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.0.0

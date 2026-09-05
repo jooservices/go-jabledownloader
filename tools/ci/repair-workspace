@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# One-time (or occasional) cleanup for self-hosted runner workspaces.
+# Fixes root-owned Docker artifacts that block actions/checkout git clean.
+set -euo pipefail
+
+repo="${1:-go-jabledownloader}"
+work_root="${RUNNER_WORK_ROOT:-/home/joos/actions-runner/_work}"
+workspace="${work_root}/${repo}"
+checkout="${workspace}/${repo}"
+
+if [[ ! -d "${workspace}" ]]; then
+  echo "Workspace not found: ${workspace}" >&2
+  exit 1
+fi
+
+runner_uid="$(id -u)"
+runner_gid="$(id -g)"
+
+echo "Reclaiming ownership under ${workspace} ..."
+if [[ "${runner_uid}" -ne 0 ]]; then
+  sudo chown -R "${runner_uid}:${runner_gid}" "${workspace}"
+else
+  chown -R "${runner_uid}:${runner_gid}" "${workspace}"
+fi
+
+if [[ -d "${work_root}/_temp" ]]; then
+  echo "Reclaiming ownership under ${work_root}/_temp ..."
+  if [[ "${runner_uid}" -ne 0 ]]; then
+    sudo chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+    sudo rm -rf "${work_root}/_temp/pr-diff-range"
+  else
+    chown -R "${runner_uid}:${runner_gid}" "${work_root}/_temp"
+    rm -rf "${work_root}/_temp/pr-diff-range"
+  fi
+fi
+
+if [[ -d "${checkout}" ]]; then
+  echo "Removing Docker artifacts under ${checkout} ..."
+  if [[ "${runner_uid}" -ne 0 ]]; then
+    sudo rm -rf \
+      "${checkout}/.cache" \
+      "${checkout}/bin" \
+      "${checkout}/dist" \
+      "${checkout}/coverage.out"
+    sudo chown -R "${runner_uid}:${runner_gid}" "${checkout}"
+  else
+    rm -rf \
+      "${checkout}/.cache" \
+      "${checkout}/bin" \
+      "${checkout}/dist" \
+      "${checkout}/coverage.out"
+    chown -R "${runner_uid}:${runner_gid}" "${checkout}"
+  fi
+fi
+
+echo "Done. Re-run failed workflows on the PR."

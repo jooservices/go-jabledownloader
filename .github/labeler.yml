@@ -1,0 +1,30 @@
+'tests':
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*_test.go'
+      - 'internal/**/testdata/**'
+
+'documentation':
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**.md'
+      - 'docs/**/*'
+
+'dependencies':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'go.mod'
+      - 'go.sum'
+
+'ci/cd':
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**/*'
+      - 'Makefile'
+      - 'Dockerfile'
+
+'source':
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'cmd/**/*'
+      - 'internal/**/*'

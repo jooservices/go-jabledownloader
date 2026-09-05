@@ -1,18 +1,17 @@
 # Dedicated CI for jooservices/go-jabledownloader — GitHub-hosted runners
-# Pull-request quality gate: full pipeline. Post-merge heads run ci-post-merge.yml.
-name: CI
+# Post-merge sanity run on master/develop heads. Full gate lives in ci.yml (pull requests).
+name: CI post-merge
 
 on:
-  pull_request:
+  push:
     branches: [master, develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-post-merge-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: read
   actions: read
 
 jobs:
@@ -48,98 +47,9 @@ jobs:
       - name: Module integrity
         run: tools/ci/docker-compose run --rm go go mod verify
 
-  lint:
-    name: Lint
-    needs: [validate]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Build CI image
-        run: tools/ci/docker-compose build go
-
-      - name: Cache Go caches
-        uses: actions/cache@v6
-        id: go-cache
-        with:
-          path: .cache
-          key: go-cache-v2-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            go-cache-v2-
-
-      - name: Download modules
-        if: steps.go-cache.outputs.cache-hit != 'true'
-        run: tools/ci/docker-compose run --rm go go mod download
-
-      - name: Vet
-        run: tools/ci/docker-compose run --rm go make vet
-
-      - name: Lint
-        run: tools/ci/docker-compose run --rm go make lint
-
-  security:
-    name: Security (${{ matrix.name }})
-    needs: [lint]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - name: Dependencies
-          - name: Secrets
-          - name: SAST
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Build CI image
-        if: matrix.name == 'Dependencies'
-        run: tools/ci/docker-compose build go
-
-      - name: Govulncheck
-        if: matrix.name == 'Dependencies'
-        run: tools/ci/docker-compose run --rm go govulncheck ./...
-
-      - name: OSV Scanner
-        if: matrix.name == 'Dependencies'
-        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
-        with:
-          scan-args: |-
-            --recursive
-            .
-
-      - name: Dependency Review
-        if: matrix.name == 'Dependencies'
-        uses: actions/dependency-review-action@v5
-
-      - name: Gitleaks OSS CLI
-        if: matrix.name == 'Secrets'
-        run: |
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/repo:ro" \
-            --workdir /repo \
-            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
-            detect --source . --redact --exit-code 1 --config=.gitleaks.toml
-
-      - name: Semgrep (OSS)
-        if: matrix.name == 'SAST'
-        run: |
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/src:ro" \
-            semgrep/semgrep@sha256:67319956da3dcb58baf5b322899c15458e3963e7018a86aeeb5cd224e69cb77a \
-            semgrep scan --config p/golang --error
-
   test:
     name: Test
-    needs: [lint]
+    needs: [validate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -170,7 +80,7 @@ jobs:
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
-          name: coverage
+          name: coverage-post-merge
           path: coverage.out
           if-no-files-found: error
 
@@ -189,7 +99,7 @@ jobs:
       - name: Download coverage artifact
         uses: actions/download-artifact@v8
         with:
-          name: coverage
+          name: coverage-post-merge
           path: build/coverage
 
       - name: Build CI image
@@ -209,7 +119,6 @@ jobs:
           }'
 
       - name: Upload to Codecov
-        if: github.event.pull_request.user.type != 'Bot'
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -218,7 +127,6 @@ jobs:
           verbose: true
 
       - name: Resolve SonarQube host URL
-        if: github.event.pull_request.user.type != 'Bot'
         id: sonar-config
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -237,7 +145,6 @@ jobs:
           echo "host_url=${host_url}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload SonarQube analysis
-        if: github.event.pull_request.user.type != 'Bot'
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -245,25 +152,3 @@ jobs:
         with:
           args: >
             -Dsonar.go.coverage.reportPaths=build/coverage/coverage.out
-
-  ci:
-    name: CI
-    needs: [validate, lint, security, test, coverage]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: ${{ !cancelled() }}
-    steps:
-      - name: Aggregate CI result
-        run: |
-          for result in \
-            "${{ needs.validate.result }}" \
-            "${{ needs.lint.result }}" \
-            "${{ needs.security.result }}" \
-            "${{ needs.test.result }}" \
-            "${{ needs.coverage.result }}"; do
-            if [ "${result}" != "success" ]; then
-              echo "CI failed: one or more required jobs did not succeed"
-              exit 1
-            fi
-          done
-          echo "CI passed"

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,6 +54,13 @@ func TestLoadExistingFile(t *testing.T) {
 	}
 }
 
+func TestPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if !strings.Contains(Path(), "jabledownloader") {
+		t.Fatalf("Path() = %q", Path())
+	}
+}
+
 func TestSaveAndReload(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -69,5 +77,26 @@ func TestSaveAndReload(t *testing.T) {
 	}
 	if reloaded.OutputDir != "/tmp/save-test" || reloaded.WorkerCount != 8 {
 		t.Fatalf("round-trip mismatch: %+v", reloaded)
+	}
+}
+
+func TestLoadInvalidJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".config", "jabledownloader")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "parse config") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
