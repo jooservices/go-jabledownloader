@@ -33,9 +33,9 @@ type Options struct {
 	MaxHeight    int
 	Count        int
 	CheckOnly    bool
-	Subtitle      bool
-	SubtitleMode  string // subtitle.ModeSoft or subtitle.ModeHard
-	WhisperModel  string
+	Subtitle     bool
+	SubtitleMode string // subtitle.ModeSoft or subtitle.ModeHard
+	WhisperModel string
 	// SpokenLanguage hints Whisper (e.g. "ja"). Empty = auto-detect.
 	SpokenLanguage string
 }
