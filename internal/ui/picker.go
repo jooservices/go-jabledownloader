@@ -187,14 +187,7 @@ func PickMulti(title string, items []PickerItem) ([]PickerItem, error) {
 	}
 	defer func() { _ = restoreTerm(int(os.Stdin.Fd()), oldState) }()
 
-	w, h, err := terminalSize(int(os.Stdin.Fd()))
-	if err != nil || w <= 0 {
-		w = 80
-	}
-	if h <= 0 {
-		h = 24
-	}
-
+	w, h := pickerWindowSize()
 	p := &picker{items: items, title: title, height: max(h-3, 5), width: w}
 	fmt.Print("\033[?25l")
 	defer fmt.Print("\033[?25h")
@@ -208,65 +201,94 @@ func PickMulti(title string, items []PickerItem) ([]PickerItem, error) {
 		}
 
 		if p.filtering {
-			switch key {
-			case keyEnter:
-				p.filtering = false
-			case keyEsc, keyCtrlC:
-				if key == keyCtrlC {
-					return nil, ErrPickerCancelled
-				}
-				p.filter = ""
-				p.filtering = false
-			case keyBack, keyCtrlW:
-				if p.filter != "" {
-					_, size := utf8.DecodeLastRuneInString(p.filter)
-					p.filter = p.filter[:len(p.filter)-size]
-				}
-			case keyCtrlU:
-				p.filter = ""
-			default:
-				if key >= 32 && key < 127 {
-					p.filter += string(rune(key))
-				}
+			if err := p.handleFilterKey(key); err != nil {
+				return nil, err
 			}
-			p.cursor = 0
-			p.scroll = 0
 			continue
 		}
 
-		vis := p.visible()
-		switch key {
-		case keyCtrlC, 'q':
-			return nil, ErrPickerCancelled
-		case keyEnter:
+		done, err := p.handleBrowseKey(key)
+		if err != nil {
+			return nil, err
+		}
+		if done {
 			return p.items, nil
-		case keyUp, 'k':
-			if p.cursor > 0 {
-				p.cursor--
-			}
-		case keyDown, 'j':
-			if p.cursor < len(vis)-1 {
-				p.cursor++
-			}
-		case keyPageUp:
-			p.cursor = max(p.cursor-10, 0)
-		case keyPageDn:
-			p.cursor = min(p.cursor+10, len(vis)-1)
-		case keySpace:
-			if len(vis) > 0 {
-				it := &p.items[vis[p.cursor]]
-				it.Selected = !it.Selected
-			}
-		case 'a':
-			for i := range p.items {
-				p.items[i].Selected = true
-			}
-		case 'n':
-			for i := range p.items {
-				p.items[i].Selected = false
-			}
-		case '/':
-			p.filtering = true
 		}
 	}
+}
+
+func pickerWindowSize() (width, height int) {
+	w, h, err := terminalSize(int(os.Stdin.Fd()))
+	if err != nil || w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	return w, h
+}
+
+func (p *picker) handleFilterKey(key int) error {
+	switch key {
+	case keyEnter:
+		p.filtering = false
+	case keyEsc, keyCtrlC:
+		if key == keyCtrlC {
+			return ErrPickerCancelled
+		}
+		p.filter = ""
+		p.filtering = false
+	case keyBack, keyCtrlW:
+		if p.filter != "" {
+			_, size := utf8.DecodeLastRuneInString(p.filter)
+			p.filter = p.filter[:len(p.filter)-size]
+		}
+	case keyCtrlU:
+		p.filter = ""
+	default:
+		if key >= 32 && key < 127 {
+			p.filter += string(rune(key))
+		}
+	}
+	p.cursor = 0
+	p.scroll = 0
+	return nil
+}
+
+func (p *picker) handleBrowseKey(key int) (done bool, err error) {
+	vis := p.visible()
+	switch key {
+	case keyCtrlC, 'q':
+		return false, ErrPickerCancelled
+	case keyEnter:
+		return true, nil
+	case keyUp, 'k':
+		if p.cursor > 0 {
+			p.cursor--
+		}
+	case keyDown, 'j':
+		if p.cursor < len(vis)-1 {
+			p.cursor++
+		}
+	case keyPageUp:
+		p.cursor = max(p.cursor-10, 0)
+	case keyPageDn:
+		p.cursor = min(p.cursor+10, len(vis)-1)
+	case keySpace:
+		if len(vis) > 0 {
+			it := &p.items[vis[p.cursor]]
+			it.Selected = !it.Selected
+		}
+	case 'a':
+		for i := range p.items {
+			p.items[i].Selected = true
+		}
+	case 'n':
+		for i := range p.items {
+			p.items[i].Selected = false
+		}
+	case '/':
+		p.filtering = true
+	}
+	return false, nil
 }
