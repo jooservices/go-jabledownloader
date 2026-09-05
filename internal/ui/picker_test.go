@@ -97,6 +97,21 @@ func TestStdWriterPrintfPrintColor(t *testing.T) {
 	}
 }
 
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	value, set := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if set {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
+}
+
 func TestColorEnabled(t *testing.T) {
 	t.Run("no_color", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
@@ -106,14 +121,14 @@ func TestColorEnabled(t *testing.T) {
 	})
 	t.Run("term_dumb", func(t *testing.T) {
 		t.Setenv("TERM", "dumb")
-		_ = os.Unsetenv("NO_COLOR")
-		_ = os.Unsetenv("FORCE_COLOR")
+		unsetEnv(t, "NO_COLOR")
+		unsetEnv(t, "FORCE_COLOR")
 		if ColorEnabled(os.Stdout) {
 			t.Fatal("TERM=dumb should disable color")
 		}
 	})
 	t.Run("force_true", func(t *testing.T) {
-		_ = os.Unsetenv("NO_COLOR")
+		unsetEnv(t, "NO_COLOR")
 		t.Setenv("TERM", "xterm")
 		t.Setenv("FORCE_COLOR", "true")
 		if !ColorEnabled(os.Stdout) {
@@ -121,7 +136,7 @@ func TestColorEnabled(t *testing.T) {
 		}
 	})
 	t.Run("force_false", func(t *testing.T) {
-		_ = os.Unsetenv("NO_COLOR")
+		unsetEnv(t, "NO_COLOR")
 		t.Setenv("TERM", "xterm")
 		t.Setenv("FORCE_COLOR", "false")
 		if ColorEnabled(os.Stdout) {

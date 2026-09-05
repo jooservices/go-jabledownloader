@@ -1,14 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"testing"
 
+	"github.com/jooservices/go-jabledownloader/internal/app"
 	"github.com/jooservices/go-jabledownloader/internal/scraper"
 	"github.com/jooservices/go-jabledownloader/internal/update"
 )
@@ -216,17 +217,11 @@ func TestRunUpdateErrors(t *testing.T) {
 }
 
 func TestRunPartialExit(t *testing.T) {
-	// Exercise PlanError exit mapping via a tiny stub command is hard; ensure
-	// run() succeeds for a no-op version flag.
-	oldArgs := os.Args
-	os.Args = []string{"jabledownloader", "--version"}
-	defer func() { os.Args = oldArgs }()
-	var buf bytes.Buffer
-	root := newRootCmd()
-	root.SetOut(&buf)
-	root.SetArgs([]string{"--version"})
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
+	if got := exitCodeFor(&app.PlanError{Failed: 2}); got != exitPartial {
+		t.Fatalf("PlanError code=%d want %d", got, exitPartial)
+	}
+	if got := exitCodeFor(errors.New("boom")); got != exitError {
+		t.Fatalf("generic error code=%d want %d", got, exitError)
 	}
 }
 

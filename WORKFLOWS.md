@@ -24,8 +24,7 @@ flowchart TD
     push[Push to master or develop] --> PostMerge[CI post-merge]
     push --> CodeQL
     push --> Audit
-
-    master[Push to master] --> Scorecard[OpenSSF Scorecard]
+    push --> Scorecard[OpenSSF Scorecard]
 
     tag[Push tag v*.*.*] --> Release[Release]
 
@@ -105,7 +104,7 @@ archives under `dist/`.
 | `semantic-pr.yml` | PR opened, edited, synchronized | PR title type + uppercase subject start |
 | `pr-labeler.yml` | PR opened, synchronized, reopened | Labels from `.github/labeler.yml` |
 | `link-check.yml` | Monday schedule; manual | Lychee Markdown link check |
-| `scorecard.yml` | Push to `master`; Monday schedule; manual | OpenSSF Scorecard → SARIF |
+| `scorecard.yml` | Push to `master` or `develop`; Monday schedule; manual | OpenSSF Scorecard → SARIF |
 | `stale.yml` | Daily; manual | Stale issues/PRs |
 | `workflow-audit.yml` | `.github/**` changes; Monday schedule; manual | Actionlint + Zizmor |
 

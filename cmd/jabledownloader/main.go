@@ -65,13 +65,17 @@ func run() int {
 	rootCmd := newRootCmd()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		var partial *app.PlanError
-		if errors.As(err, &partial) {
-			return exitPartial
-		}
-		return exitError
+		return exitCodeFor(err)
 	}
 	return exitOK
+}
+
+func exitCodeFor(err error) int {
+	var partial *app.PlanError
+	if errors.As(err, &partial) {
+		return exitPartial
+	}
+	return exitError
 }
 
 func newRootCmd() *cobra.Command {

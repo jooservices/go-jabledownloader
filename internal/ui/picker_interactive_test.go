@@ -41,22 +41,20 @@ func TestPickMultiInteractive(t *testing.T) {
 	defer devNull.Close()
 	os.Stdout = devNull
 
-	// Script: down, space (deselect), a (all), n (none), a, / filter, type x, esc clear,
-	// / filter, type A, enter leave filter, page keys, enter confirm.
+	// Script ends with none selected, then select only the first item.
 	script := []byte{
 		'j',      // down
 		' ',      // toggle
 		'a',      // all
-		'n',      // none
-		'a',      // all again
 		'/', 'A', // filter
-		keyEnter,     // leave filter
-		27, '[', '5', // page up (partial — needs 3 bytes; '5' alone triggers pageup in our parser)
+		keyEnter, // leave filter
+		27, '[', '5',
 		27, '[', '6',
 		'k', // up
+		'n', // none
+		' ', // toggle first (cursor 0)
 		keyEnter,
 	}
-	// Fix page-up/down: readKey for '5'/'6' does not consume trailing '~'. OK for our switch.
 
 	go func() {
 		_, _ = w.Write(script)
@@ -73,6 +71,9 @@ func TestPickMultiInteractive(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("len=%d", len(got))
+	}
+	if !got[0].Selected || got[1].Selected {
+		t.Fatalf("Selected=[%v,%v] want [true,false]", got[0].Selected, got[1].Selected)
 	}
 }
 

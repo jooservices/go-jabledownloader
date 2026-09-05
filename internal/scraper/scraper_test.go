@@ -8,12 +8,27 @@ import (
 	"testing"
 )
 
-// fileFetcher serves fixture HTML from testdata/, keyed by URL suffix.
+// fileFetcher serves fixture HTML from testdata/.
 type fileFetcher struct {
 	file string
 }
 
 func (f *fileFetcher) FetchHTML(_ context.Context, _ string) (string, error) {
+	data, err := os.ReadFile(filepath.Join("testdata", f.file))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// recordingFetcher serves fixture HTML and records the last requested URL.
+type recordingFetcher struct {
+	file string
+	url  string
+}
+
+func (f *recordingFetcher) FetchHTML(_ context.Context, url string) (string, error) {
+	f.url = url
 	data, err := os.ReadFile(filepath.Join("testdata", f.file))
 	if err != nil {
 		return "", err
@@ -82,10 +97,15 @@ func TestBrowseEntries(t *testing.T) {
 }
 
 func TestHotVideos(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "browse_page.html"})
+	fetcher := &recordingFetcher{file: "browse_page.html"}
+	c := NewClient(fetcher)
 	entries, err := c.HotVideos(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("HotVideos: %v", err)
+	}
+	wantURL := BaseURL + "/hot/?page=1"
+	if fetcher.url != wantURL {
+		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
 	}
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
@@ -103,10 +123,15 @@ func TestBrowseFetcherError(t *testing.T) {
 }
 
 func TestSearchVideos(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "browse_page.html"})
+	fetcher := &recordingFetcher{file: "browse_page.html"}
+	c := NewClient(fetcher)
 	entries, err := c.SearchVideos(context.Background(), "jur", 1)
 	if err != nil {
 		t.Fatalf("SearchVideos: %v", err)
+	}
+	wantURL := BaseURL + "/search/jur/?page=1"
+	if fetcher.url != wantURL {
+		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
 	}
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
