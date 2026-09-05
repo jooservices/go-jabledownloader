@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -55,12 +56,17 @@ func TestProgressSegmentsFlow(t *testing.T) {
 	if !strings.Contains(rl, "\033[K") {
 		t.Fatalf("RenderLine clear missing: %q", rl)
 	}
-	rl2 := p.RenderLine(5)
-	if !strings.Contains(rl2, "\033[5A") {
-		t.Fatalf("expected cursor up: %q", rl2)
+	n := p.LineCount()
+	rl2 := p.RenderLine(n)
+	wantUp := fmt.Sprintf("\033[%dA", n-1)
+	if n > 1 && !strings.Contains(rl2, wantUp) {
+		t.Fatalf("expected cursor up %q in %q", wantUp, rl2)
 	}
-	if block := ClearBlock(3); !strings.Contains(block, "\033[3A") {
-		t.Fatalf("ClearBlock: %q", block)
+	if block := ClearBlock(3); !strings.Contains(block, "\033[2A") {
+		t.Fatalf("ClearBlock should move up lines-1: %q", block)
+	}
+	if block := ClearBlock(1); strings.Contains(block, "A") {
+		t.Fatalf("single-line ClearBlock needs no cursor-up: %q", block)
 	}
 
 	sum := p.Summary()

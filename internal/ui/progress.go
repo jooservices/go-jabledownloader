@@ -110,12 +110,15 @@ func (p *Progress) LineCount() int {
 
 // RenderLine returns the progress block positioned to overwrite the previous
 // TTY block (move cursor up + clear each line).
+//
+// Render() leaves the cursor on the block's final line (no trailing newline).
+// To reach the first line of an N-line block, move up N-1 rows.
 func (p *Progress) RenderLine(prevLines int) string {
 	block := p.Render()
 	lines := strings.Split(block, "\n")
 	var b strings.Builder
-	if prevLines > 0 {
-		fmt.Fprintf(&b, "\033[%dA", prevLines)
+	if prevLines > 1 {
+		fmt.Fprintf(&b, "\033[%dA", prevLines-1)
 	}
 	for i, line := range lines {
 		b.WriteString("\r\033[K")
@@ -128,12 +131,15 @@ func (p *Progress) RenderLine(prevLines int) string {
 }
 
 // ClearBlock clears the last rendered TTY progress block.
+// Cursor is assumed to be on the block's final line (see RenderLine).
 func ClearBlock(lines int) string {
 	if lines <= 0 {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\033[%dA", lines)
+	if lines > 1 {
+		fmt.Fprintf(&b, "\033[%dA", lines-1)
+	}
 	for i := 0; i < lines; i++ {
 		b.WriteString("\r\033[K")
 		if i < lines-1 {

@@ -575,6 +575,42 @@ func TestEmbedSubtitlesSoftSuccess(t *testing.T) {
 	}
 }
 
+func TestEmbedSubtitlesSkipsWhenSidecarExists(t *testing.T) {
+	orig := embedEnglish
+	t.Cleanup(func() { embedEnglish = orig })
+	called := false
+	embedEnglish = func(context.Context, string, subtitle.Options) error {
+		called = true
+		return nil
+	}
+
+	dir := t.TempDir()
+	video := filepath.Join(dir, "clip.mp4")
+	srt := filepath.Join(dir, "clip.en.srt")
+	if err := os.WriteFile(video, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srt, []byte("1\n00:00:00,000 --> 00:00:01,000\nHi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var sb stringsBuilder
+	svc := &Service{
+		Out:  ui.NewStdWriter(&sb, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{SubtitleMode: string(subtitle.ModeHard)},
+	}
+	if err := svc.embedSubtitles(context.Background(), video); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("must not re-embed when .en.srt exists")
+	}
+	if !strings.Contains(sb.String(), "already present") {
+		t.Fatalf("expected skip message, got %q", sb.String())
+	}
+}
+
 func TestEmbedSubtitlesHardSuccess(t *testing.T) {
 	orig := embedEnglish
 	t.Cleanup(func() { embedEnglish = orig })

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -352,6 +353,19 @@ func (s *Service) embedSubtitles(ctx context.Context, videoPath string) error {
 	if err != nil {
 		return err
 	}
+	// Sidecar marks a prior successful embed. Re-running hard mode would burn
+	// another layer into the stored pixels; soft re-mux is wasteful. Delete
+	// the .en.srt to regenerate.
+	srtPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".en.srt"
+	if _, err := os.Stat(srtPath); err == nil {
+		if !s.Opts.Quiet {
+			s.Out.Printf("  %s%s English subtitles already present (%s) — skip embed%s\n",
+				ui.ColorYellow, ui.IconSkip, filepath.Base(srtPath), ui.ColorReset)
+		}
+		s.Tel.Count(ctx, "subtitle.embed", 1, attribute.String("outcome", "skipped"), attribute.String("mode", mode))
+		return nil
+	}
+
 	if !s.Opts.Quiet {
 		s.Out.Printf("  %s%s Embedding English subtitles (mode=%s, mlx_whisper)...%s\n",
 			ui.ColorCyan, ui.IconSpark, mode, ui.ColorReset)
@@ -396,7 +410,9 @@ type progressDisplay struct {
 	tty       bool
 	done      chan struct{}
 	closed    bool
+	started   bool
 	lastLines int
+	wg        sync.WaitGroup
 }
 
 func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressDisplay {
@@ -408,7 +424,10 @@ func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressD
 	if !tty {
 		interval = 800 * time.Millisecond
 	}
+	d.started = true
+	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -435,6 +454,9 @@ func (d *progressDisplay) stop() {
 	}
 	d.closed = true
 	close(d.done)
+	if d.started {
+		d.wg.Wait()
+	}
 	if !d.quiet && d.tty {
 		d.w.Print(ui.ClearBlock(d.lastLines))
 	}

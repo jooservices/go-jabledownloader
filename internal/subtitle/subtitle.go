@@ -87,25 +87,34 @@ func EmbedEnglish(ctx context.Context, videoPath string, opt Options) error {
 	audioPath := filepath.Join(dir, "."+base+".subtitle.wav")
 	srtPath := filepath.Join(dir, base+".en.srt")
 	tmpOut := filepath.Join(dir, "."+base+".withsubs.mp4")
+	whisperDir, err := os.MkdirTemp(dir, "."+base+".whisper-*")
+	if err != nil {
+		return fmt.Errorf("create whisper output dir: %w", err)
+	}
 	defer os.Remove(audioPath)
 	defer os.Remove(tmpOut)
+	defer os.RemoveAll(whisperDir)
+
+	srcMode := filePerm(videoPath)
 
 	if err := extractAudio(ctx, videoPath, audioPath); err != nil {
 		return err
 	}
 	// mlx_whisper ResultWriter uses Path.with_suffix(".srt"), which replaces any
-	// existing suffix. Pass a suffix-free name, then rename to *.en.srt.
-	whisperName := base + "-en"
-	whisperSRT := filepath.Join(dir, whisperName+".srt")
-	if err := runWhisperTranslate(ctx, whisper, audioPath, dir, whisperName, model, opt); err != nil {
+	// existing suffix. Write into an isolated temp dir so a pre-existing
+	// *.en.srt cannot be mistaken for this run's output.
+	whisperName := "subtitle-en"
+	whisperSRT := filepath.Join(whisperDir, whisperName+".srt")
+	if err := runWhisperTranslate(ctx, whisper, audioPath, whisperDir, whisperName, model, opt); err != nil {
 		return err
 	}
-	if err := resolveEnglishSRT(whisperSRT, filepath.Join(dir, base+".srt"), srtPath); err != nil {
+	if err := resolveEnglishSRT(whisperSRT, filepath.Join(whisperDir, "subtitle.srt"), srtPath); err != nil {
 		return err
 	}
 	if err := validateEnglishSRT(srtPath); err != nil {
 		return err
 	}
+	_ = os.Chmod(srtPath, srcMode)
 
 	switch mode {
 	case ModeHard:
@@ -117,25 +126,21 @@ func EmbedEnglish(ctx context.Context, videoPath string, opt Options) error {
 			return err
 		}
 	}
+	_ = os.Chmod(tmpOut, srcMode)
 	if err := os.Rename(tmpOut, videoPath); err != nil {
 		return fmt.Errorf("replace video with subtitled file: %w", err)
 	}
 	return nil
 }
 
-// resolveEnglishSRT finds the SRT mlx_whisper wrote and normalizes it to dest
-// (*.en.srt). Accepts the preferred name and a legacy "<base>.srt" path.
+// resolveEnglishSRT finds the SRT mlx_whisper wrote in this run and normalizes
+// it to dest (*.en.srt). Only preferred/legacy names from the current Whisper
+// output directory are accepted — never a pre-existing dest sidecar.
 func resolveEnglishSRT(preferred, legacy, dest string) error {
-	if preferred == dest {
-		if _, err := os.Stat(dest); err != nil {
-			return fmt.Errorf("whisper did not produce %s: %w", dest, err)
-		}
-		return nil
-	}
-	candidates := []string{preferred, legacy, dest}
+	candidates := []string{preferred, legacy}
 	var found string
 	for _, c := range candidates {
-		if c == "" {
+		if c == "" || c == dest {
 			continue
 		}
 		if _, err := os.Stat(c); err == nil {
@@ -144,16 +149,21 @@ func resolveEnglishSRT(preferred, legacy, dest string) error {
 		}
 	}
 	if found == "" {
-		return fmt.Errorf("whisper did not produce %s (also looked for %s)", dest, preferred)
-	}
-	if found == dest {
-		return nil
+		return fmt.Errorf("whisper did not produce %s (also looked for %s)", preferred, legacy)
 	}
 	_ = os.Remove(dest)
 	if err := os.Rename(found, dest); err != nil {
 		return fmt.Errorf("normalize subtitle path to %s: %w", dest, err)
 	}
 	return nil
+}
+
+func filePerm(path string) os.FileMode {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0o644
+	}
+	return fi.Mode().Perm()
 }
 
 // validateEnglishSRT rejects outputs that are still mostly Japanese — a known

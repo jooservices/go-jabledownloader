@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would strip it); normalize to `<code>-<codec>.en.srt`
 - Reject mostly-Japanese subtitle files so a failed translate cannot be muxed
   as English
+- Whisper output uses an isolated temp dir so a pre-existing `.en.srt` cannot be
+  treated as this run's translate result
+- Skip re-embed when `.en.srt` already exists (avoids double hard-burn)
+- Preserve source video permission bits on the subtitled MP4 and `.en.srt`
+- Progress TTY overwrite uses `lines-1` cursor-up; `stop` waits for the renderer
+  before clearing the block
 
 ## [4.1.0] - 2026-09-05
 

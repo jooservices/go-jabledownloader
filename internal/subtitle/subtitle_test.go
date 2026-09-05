@@ -97,6 +97,25 @@ func TestResolveEnglishSRTMissing(t *testing.T) {
 	}
 }
 
+func TestResolveEnglishSRTIgnoresPreexistingDest(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "clip.en.srt")
+	if err := os.WriteFile(dest, []byte("1\n00:00:00,000 --> 00:00:01,000\nStale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := resolveEnglishSRT(filepath.Join(dir, "missing-en.srt"), filepath.Join(dir, "missing.srt"), dest)
+	if err == nil || !strings.Contains(err.Error(), "did not produce") {
+		t.Fatalf("expected missing-output error, got %v", err)
+	}
+	data, readErr := os.ReadFile(dest)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(data), "Stale") {
+		t.Fatalf("dest should remain untouched: %q", data)
+	}
+}
+
 func TestValidateEnglishSRT(t *testing.T) {
 	dir := t.TempDir()
 	en := filepath.Join(dir, "ok.srt")
@@ -108,7 +127,6 @@ func TestValidateEnglishSRT(t *testing.T) {
 	if err := os.WriteFile(jp, []byte("1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// One JP char is OK when English dominates.
 	if err := os.WriteFile(mixed, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello world あ\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -120,21 +138,6 @@ func TestValidateEnglishSRT(t *testing.T) {
 	}
 	if err := validateEnglishSRT(mixed); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestResolveEnglishSRTPreferredIsDest(t *testing.T) {
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "clip.en.srt")
-	if err := os.WriteFile(dest, []byte("ok\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := resolveEnglishSRT(dest, filepath.Join(dir, "legacy.srt"), dest); err != nil {
-		t.Fatal(err)
-	}
-	missing := filepath.Join(dir, "gone.en.srt")
-	if err := resolveEnglishSRT(missing, filepath.Join(dir, "legacy.srt"), missing); err == nil {
-		t.Fatal("expected missing dest error")
 	}
 }
 
