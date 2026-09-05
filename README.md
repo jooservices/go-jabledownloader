@@ -94,6 +94,112 @@ English subtitles (`--subtitle`) run on the **host** after the MP4 is ready:
 **soft** mux (`mov_text`, language `eng`; default) or **hard** burn-in (pixels;
 needs ffmpeg with libass).
 
+## Optional: cover, screenshots & AI catalog copy (host)
+
+This is **not** part of the `jabledownloader` binary. After you already have
+`<code>-<codec>.mp4` and (optionally) `<code>-<codec>.en.srt`, you can build a
+cover, multi-frame screenshots, and bilingual story / description with
+**ffmpeg** + any vision-capable AI CLI (example: [OpenCode](https://opencode.ai)
+`opencode run`).
+
+Example layout under the video folder:
+
+```text
+videos/<code>/
+  <code>-h264.mp4
+  <code>-h264.en.srt
+  _meta/
+    cover.jpg
+    screenshots/shot-01.jpg … shot-N.jpg
+    dialogue.en.txt
+    metadata.md
+```
+
+### 1. Cover + screenshots (ffmpeg)
+
+```bash
+DIR=videos/abf-382
+MP4=$DIR/abf-382-h264.mp4
+OUT=$DIR/_meta
+mkdir -p "$OUT/screenshots"
+
+DUR=$(ffprobe -v error -show_entries format=duration \
+  -of default=noprint_wrappers=1:nokey=1 "$MP4")
+
+# Cover ~12% in (often avoids a black intro)
+ffmpeg -y -ss "$(python3 -c "print(f'{float('$DUR')*0.12:.2f}')")" \
+  -i "$MP4" -frames:v 1 -q:v 2 "$OUT/cover.jpg"
+
+# Evenly spaced frames (adjust count / percents as you like)
+python3 - <<PY
+import subprocess
+dur = float("$DUR")
+mp4, out = "$MP4", "$OUT/screenshots"
+for i, p in enumerate((0.08, 0.16, 0.24, 0.32, 0.40, 0.48, 0.56, 0.64, 0.72, 0.80, 0.88), 1):
+    t = dur * p
+    subprocess.run(
+        ["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", mp4, "-frames:v", "1", "-q:v", "2",
+         f"{out}/shot-{i:02d}.jpg"],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    print(f"shot-{i:02d} @{t:.1f}s")
+PY
+```
+
+### 2. Dialogue text from `.en.srt`
+
+Strip indexes and timestamps so the model gets spoken lines only:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import re
+srt = Path("videos/abf-382/abf-382-h264.en.srt").read_text(encoding="utf-8")
+lines = []
+for block in re.split(r"\n\s*\n", srt.strip()):
+    body = []
+    for line in block.splitlines():
+        s = line.strip()
+        if not s or re.match(r"^\d+$", s) or "-->" in s:
+            continue
+        body.append(s)
+    if body:
+        lines.append(" ".join(body))
+# drop consecutive duplicates
+out = []
+for line in lines:
+    if not out or out[-1] != line:
+        out.append(line)
+Path("videos/abf-382/_meta/dialogue.en.txt").write_text("\n".join(out), encoding="utf-8")
+print(len(out), "lines")
+PY
+```
+
+### 3. Story + description via OpenCode (vision)
+
+Use a **vision** model. Some providers cap images per prompt (e.g. DeepSeek
+vision: **at most 4 images**) — attach cover + a few key shots, not the full set.
+
+```bash
+cd videos/abf-382/_meta
+
+opencode run --auto \
+  -m opencode-go/deepseek-v4-flash-vision-exp \
+  -f cover.jpg \
+  -f screenshots/shot-03.jpg \
+  -f screenshots/shot-07.jpg \
+  -f screenshots/shot-11.jpg \
+  -f dialogue.en.txt \
+  --dir . \
+  'Write metadata.md with: Description (English), Description (Vietnamese),
+Story (English), Story (Vietnamese), and Tags. Base it on the attached images
+and dialogue.en.txt. Professional catalog copy; bilingual EN/VI.'
+```
+
+Output: `_meta/metadata.md`. Swap the model / CLI if you prefer another local
+or hosted agent — the binary is only needed for download (and optional
+`--subtitle`).
+
 ## CLI / commands
 
 | Command | Purpose |
