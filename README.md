@@ -5,7 +5,7 @@
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_go-jabledownloader&metric=alert_status&branch=develop)](https://sonarcloud.io/summary/new_code?id=jooservices_go-jabledownloader&branch=develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/go-jabledownloader/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/go-jabledownloader)
 [![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg)](https://go.dev/)
-[![Release](https://img.shields.io/badge/version-4.0.0-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-4.1.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Download videos from Jable.TV — a single-binary Go CLI with Cloudflare
@@ -63,7 +63,7 @@ layout.
 
 ```bash
 # Prebuilt release archive — no Docker needed:
-tar -xzf jabledownloader_v4.0.0_darwin_arm64.tar.gz
+tar -xzf jabledownloader_v4.1.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 
 jabledownloader get jur-827

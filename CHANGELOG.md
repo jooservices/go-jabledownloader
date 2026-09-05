@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-05
+
 ### Added
 
 - `search --count` / `-n` (parity with `latest` / `hot`)
@@ -65,4 +67,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `flickrdownloader` leftovers from the self-update package
 - Removed dead scraper endpoints with no CLI command
 
+[4.1.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.1.0
 [4.0.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.0.0
