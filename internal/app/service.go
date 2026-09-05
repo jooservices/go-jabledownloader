@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -15,23 +16,29 @@ import (
 	"github.com/jooservices/go-jabledownloader/internal/format"
 	"github.com/jooservices/go-jabledownloader/internal/hls"
 	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
 )
 
 // Options are the user-level switches for a run.
 type Options struct {
-	DryRun    bool
-	Yes       bool
-	Quiet     bool
-	Verbose   bool
-	Force     bool
-	TTY       bool
-	Workers   int
-	OutDir    string
-	MaxHeight int
-	Count     int
-	CheckOnly bool
+	DryRun       bool
+	Yes          bool
+	Quiet        bool
+	Verbose      bool
+	Force        bool
+	TTY          bool
+	Workers      int
+	OutDir       string
+	MaxHeight    int
+	Count        int
+	CheckOnly    bool
+	Subtitle     bool
+	SubtitleMode string // subtitle.ModeSoft or subtitle.ModeHard
+	WhisperModel string
+	// SpokenLanguage hints Whisper (e.g. "ja"). Empty = auto-detect.
+	SpokenLanguage string
 }
 
 // Service runs the download use-cases.
@@ -61,6 +68,9 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 		videoDir := VideoDir(s.Config.OutputDir, code)
 		if existing := FindCompleteVideo(videoDir, code); existing != "" {
 			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+			if s.Opts.Subtitle {
+				return s.embedSubtitles(ctx, existing)
+			}
 			return nil
 		}
 	}
@@ -90,6 +100,9 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	if !s.Opts.Force {
 		if existing := FindCompleteVideo(videoDir, info.Code); existing != "" {
 			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+			if s.Opts.Subtitle {
+				return s.embedSubtitles(ctx, existing)
+			}
 			return nil
 		}
 	}
@@ -103,6 +116,9 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	s.Out.Printf("  %s%s Size: %s%s\n", ui.ColorDim, ui.IconDisk, format.Bytes(result.Size), ui.ColorReset)
 	if s.Opts.Verbose {
 		s.Out.Printf("  %sCodec:%s   %s\n", ui.ColorDim, ui.ColorReset, result.Codec)
+	}
+	if s.Opts.Subtitle {
+		return s.embedSubtitles(ctx, result.Path)
 	}
 	return nil
 }
@@ -190,6 +206,13 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 		if !s.Opts.Force {
 			if existing := FindCompleteVideo(videoDir, entry.Code); existing != "" {
 				s.Out.Printf("    %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
+				if s.Opts.Subtitle {
+					if err := s.embedSubtitles(ctx, existing); err != nil {
+						s.Out.Printf("    %s%s Subtitles: %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
+						failed++
+						continue
+					}
+				}
 				skipped++
 				continue
 			}
@@ -210,6 +233,14 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 			s.Out.Printf("    %s%s Download: %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
 			failed++
 			continue
+		}
+
+		if s.Opts.Subtitle {
+			if err := s.embedSubtitles(ctx, result.Path); err != nil {
+				s.Out.Printf("    %s%s Subtitles: %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
+				failed++
+				continue
+			}
 		}
 
 		totalSize += result.Size
@@ -268,6 +299,7 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 	}
 
 	progress := ui.NewProgress(0)
+	progress.SetLabel(info.Code)
 	display := newProgressDisplay(s.Out, progress, s.Opts.Quiet, s.Opts.TTY)
 	defer display.stop()
 
@@ -310,17 +342,77 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 	return result, nil
 }
 
-// progressDisplay renders the progress line at a fixed interval until stop.
-// On a TTY it overwrites a single line (carriage return). On a non-TTY
-// (pipes, docker logs) it prints newline-terminated snapshots instead, since
-// log collectors buffer output that lacks newlines.
+func (s *Service) embedSubtitles(ctx context.Context, videoPath string) error {
+	ctx, span := s.span(ctx, "subtitle.embed_english",
+		attribute.String("path", videoPath),
+		attribute.String("mode", s.Opts.SubtitleMode),
+	)
+	defer span()
+
+	mode, err := subtitle.ParseMode(s.Opts.SubtitleMode)
+	if err != nil {
+		return err
+	}
+	// Sidecar marks a prior successful embed. Re-running hard mode would burn
+	// another layer into the stored pixels; soft re-mux is wasteful. Delete
+	// the .en.srt to regenerate.
+	srtPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".en.srt"
+	if _, err := os.Stat(srtPath); err == nil {
+		if !s.Opts.Quiet {
+			s.Out.Printf("  %s%s English subtitles already present (%s) — skip embed%s\n",
+				ui.ColorYellow, ui.IconSkip, filepath.Base(srtPath), ui.ColorReset)
+		}
+		s.Tel.Count(ctx, "subtitle.embed", 1, attribute.String("outcome", "skipped"), attribute.String("mode", mode))
+		return nil
+	}
+
+	if !s.Opts.Quiet {
+		s.Out.Printf("  %s%s Embedding English subtitles (mode=%s, mlx_whisper)...%s\n",
+			ui.ColorCyan, ui.IconSpark, mode, ui.ColorReset)
+	}
+	start := time.Now()
+	err = embedEnglish(ctx, videoPath, subtitle.Options{
+		Model:    s.Opts.WhisperModel,
+		Language: s.Opts.SpokenLanguage,
+		Mode:     mode,
+		Verbose:  s.Opts.Verbose,
+	})
+	s.Tel.Record(ctx, "subtitle.embed.duration_ms", float64(time.Since(start).Milliseconds()),
+		attribute.String("mode", mode))
+	if err != nil {
+		s.Tel.Count(ctx, "subtitle.embed", 1, attribute.String("outcome", "failed"), attribute.String("mode", mode))
+		return fmt.Errorf("embed English subtitles: %w", err)
+	}
+	s.Tel.Count(ctx, "subtitle.embed", 1, attribute.String("outcome", "ok"), attribute.String("mode", mode))
+	if !s.Opts.Quiet {
+		switch mode {
+		case subtitle.ModeHard:
+			s.Out.Printf("  %s%s English hardsubs burned into %s%s\n",
+				ui.ColorGreen, ui.IconOk, filepath.Base(videoPath), ui.ColorReset)
+		default:
+			s.Out.Printf("  %s%s English soft subs muxed into %s%s\n",
+				ui.ColorGreen, ui.IconOk, filepath.Base(videoPath), ui.ColorReset)
+		}
+	}
+	return nil
+}
+
+// embedEnglish is the subtitle seam (overridden in tests).
+var embedEnglish = subtitle.EmbedEnglish
+
+// progressDisplay renders the progress block at a fixed interval until stop.
+// On a TTY it overwrites the previous multi-line block. On a non-TTY
+// (pipes, docker logs) it prints newline-terminated snapshots instead.
 type progressDisplay struct {
-	w      ui.Writer
-	p      *ui.Progress
-	quiet  bool
-	tty    bool
-	done   chan struct{}
-	closed bool
+	w         ui.Writer
+	p         *ui.Progress
+	quiet     bool
+	tty       bool
+	done      chan struct{}
+	closed    bool
+	started   bool
+	lastLines int
+	wg        sync.WaitGroup
 }
 
 func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressDisplay {
@@ -332,7 +424,10 @@ func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressD
 	if !tty {
 		interval = 800 * time.Millisecond
 	}
+	d.started = true
+	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -341,7 +436,9 @@ func newProgressDisplay(w ui.Writer, p *ui.Progress, quiet, tty bool) *progressD
 				return
 			case <-ticker.C:
 				if d.tty {
-					d.w.Print(d.p.RenderLine())
+					n := d.p.LineCount()
+					d.w.Print(d.p.RenderLine(d.lastLines))
+					d.lastLines = n
 				} else {
 					d.w.Printf("%s\n", d.p.Render())
 				}
@@ -357,8 +454,11 @@ func (d *progressDisplay) stop() {
 	}
 	d.closed = true
 	close(d.done)
+	if d.started {
+		d.wg.Wait()
+	}
 	if !d.quiet && d.tty {
-		d.w.Print("\r\033[K")
+		d.w.Print(ui.ClearBlock(d.lastLines))
 	}
 }
 

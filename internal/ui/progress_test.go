@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 func TestProgressSegmentsFlow(t *testing.T) {
 	p := NewProgress(10)
+	p.SetLabel("demo-h264.mp4")
 	if !p.SegmentsUsed() {
 		t.Fatal("expected SegmentsUsed true when total > 0")
 	}
@@ -22,27 +24,49 @@ func TestProgressSegmentsFlow(t *testing.T) {
 		t.Fatalf("resume = %q", p.ResumeMessage())
 	}
 
-	p.Update(hls.Event{Kind: hls.EventSegments, Done: 3, Total: 10, Bytes: 1024, Failed: 1})
+	p.Update(hls.Event{Kind: hls.EventSegments, Done: 3, Total: 10, Bytes: 3_000_000, Failed: 1})
 	p.Update(hls.Event{Kind: hls.EventRetry, Message: "rate-limited"})
 	p.Update(hls.Event{Kind: hls.EventRetry, Message: "rate-limited"}) // duplicate ignored
 	p.Update(hls.Event{Kind: hls.EventRetry, Message: "server error"})
 
-	// Age the start so speed/eta branch can fire.
+	// Age the start and samples so speed/eta branch can fire.
 	p.mu.Lock()
-	p.start = time.Now().Add(-time.Second)
+	p.start = time.Now().Add(-2 * time.Second)
+	if len(p.samples) > 0 {
+		p.samples[0].at = time.Now().Add(-2 * time.Second)
+		p.samples[0].bytes = 500_000
+	}
+	p.samples = append(p.samples, speedSample{at: time.Now(), bytes: 3_000_000})
 	p.mu.Unlock()
 
 	line := p.Render()
-	if !strings.Contains(line, "%") || !strings.Contains(line, "3") {
-		t.Fatalf("unexpected render: %q", line)
+	for _, want := range []string{"%", "Segs", "Size", "left", "Speed", "eta", "demo-h264.mp4"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("render missing %q: %q", want, line)
+		}
 	}
 	if !strings.Contains(line, "failed") {
 		t.Fatalf("expected failed marker: %q", line)
 	}
+	if p.LineCount() < 4 {
+		t.Fatalf("expected multi-line block, lines=%d", p.LineCount())
+	}
 
-	rl := p.RenderLine()
-	if !strings.HasPrefix(rl, "\r\033[K") {
-		t.Fatalf("RenderLine prefix missing: %q", rl)
+	rl := p.RenderLine(0)
+	if !strings.Contains(rl, "\033[K") {
+		t.Fatalf("RenderLine clear missing: %q", rl)
+	}
+	n := p.LineCount()
+	rl2 := p.RenderLine(n)
+	wantUp := fmt.Sprintf("\033[%dA", n-1)
+	if n > 1 && !strings.Contains(rl2, wantUp) {
+		t.Fatalf("expected cursor up %q in %q", wantUp, rl2)
+	}
+	if block := ClearBlock(3); !strings.Contains(block, "\033[2A") {
+		t.Fatalf("ClearBlock should move up lines-1: %q", block)
+	}
+	if block := ClearBlock(1); strings.Contains(block, "A") {
+		t.Fatalf("single-line ClearBlock needs no cursor-up: %q", block)
 	}
 
 	sum := p.Summary()
@@ -62,7 +86,7 @@ func TestProgressFFmpegFlow(t *testing.T) {
 	p.mu.Unlock()
 
 	line := p.Render()
-	if !strings.Contains(line, "Downloading") {
+	if !strings.Contains(line, "ffmpeg") {
 		t.Fatalf("expected ffmpeg render: %q", line)
 	}
 	if !strings.Contains(line, "1.5x") {
