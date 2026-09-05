@@ -210,11 +210,14 @@ jobs:
 
       - name: Upload to Codecov
         if: github.event.pull_request.user.type != 'Bot'
+        continue-on-error: true
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build/coverage/coverage.out
-          fail_ci_if_error: true
+          # Soft until the Codecov GitHub App includes this repo (install is
+          # "selected" repos). Flip fail_ci_if_error to true after onboarding.
+          fail_ci_if_error: false
           verbose: true
 
       - name: Resolve SonarQube host URL
