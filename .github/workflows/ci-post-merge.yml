@@ -119,14 +119,11 @@ jobs:
           }'
 
       - name: Upload to Codecov
-        continue-on-error: true
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build/coverage/coverage.out
-          # Soft until the Codecov GitHub App includes this repo (install is
-          # "selected" repos). Flip fail_ci_if_error to true after onboarding.
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           verbose: true
 
       - name: Resolve SonarQube host URL
