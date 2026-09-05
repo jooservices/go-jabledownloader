@@ -24,8 +24,7 @@ flowchart TD
     push[Push to master or develop] --> PostMerge[CI post-merge]
     push --> CodeQL
     push --> Audit
-
-    master[Push to master] --> Scorecard[OpenSSF Scorecard]
+    push --> Scorecard[OpenSSF Scorecard]
 
     tag[Push tag v*.*.*] --> Release[Release]
 
@@ -60,7 +59,7 @@ flowchart TD
     S --- S1[Dependencies: govulncheck + OSV + Dependency Review]
     S --- S2[Secrets: Gitleaks OSS CLI in pinned Docker image]
     S --- S3[SAST: Semgrep OSS golang]
-    C --- C1[Enforce coverage floor]
+    C --- C1[Enforce 85% coverage floor]
     C --- C2[Upload to Codecov and SonarQube]
 ```
 
@@ -69,6 +68,8 @@ Every Go job builds the CI image, restores Go module caches under `.cache`
 job definition and select their tool via the matrix name. The leaf `CI` job
 aggregates Validate → Lint → Security → Test → Coverage for a single
 branch-protection context when needed.
+
+Coverage floor is **85%** of statements (`go tool cover -func`).
 
 `CODECOV_TOKEN` and `SONAR_TOKEN` are organization secrets — grant this
 repository access when onboarding. `SONAR_HOST_URL` is optional (defaults to
@@ -103,7 +104,7 @@ archives under `dist/`.
 | `semantic-pr.yml` | PR opened, edited, synchronized | PR title type + uppercase subject start |
 | `pr-labeler.yml` | PR opened, synchronized, reopened | Labels from `.github/labeler.yml` |
 | `link-check.yml` | Monday schedule; manual | Lychee Markdown link check |
-| `scorecard.yml` | Push to `master`; Monday schedule; manual | OpenSSF Scorecard → SARIF |
+| `scorecard.yml` | Push to `master` or `develop`; Monday schedule; manual | OpenSSF Scorecard → SARIF |
 | `stale.yml` | Daily; manual | Stale issues/PRs |
 | `workflow-audit.yml` | `.github/**` changes; Monday schedule; manual | Actionlint + Zizmor |
 

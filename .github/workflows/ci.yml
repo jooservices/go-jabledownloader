@@ -199,8 +199,8 @@ jobs:
         run: |
           total="$(tools/ci/docker-compose run --rm go sh -c 'go tool cover -func=build/coverage/coverage.out' | awk '/^total:/{gsub(/%/,"",$NF); print $NF}')"
           echo "Total coverage: ${total}%"
-          # Interim floor while test coverage grows; raise toward 85% target.
-          awk -v total="${total}" -v floor=25 'BEGIN {
+          # Coverage floor: 85% total (go tool cover -func).
+          awk -v total="${total}" -v floor=85 'BEGIN {
             if (total < floor) {
               printf "FAIL: coverage %.1f%% is below the %.1f%% floor\n", total, floor
               exit 1
