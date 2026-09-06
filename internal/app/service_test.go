@@ -13,6 +13,7 @@ import (
 
 	"github.com/jooservices/go-jabledownloader/internal/config"
 	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
 )
@@ -22,9 +23,14 @@ func TestFindExistingVideo(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "jur-001-h264.mp4"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Derived hardsub must not win over the primary download.
+	if err := os.WriteFile(filepath.Join(dir, "jur-001-h264.hard.mp4"), []byte("hard"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	if got := FindExistingVideo(dir, "jur-001"); got == "" {
-		t.Fatal("expected existing video to be found")
+	got := FindExistingVideo(dir, "jur-001")
+	if got == "" || filepath.Base(got) != "jur-001-h264.mp4" {
+		t.Fatalf("expected primary h264 mp4, got %q", got)
 	}
 	if got := FindExistingVideo(dir, "jur-002"); got != "" {
 		t.Fatalf("expected no match, got %q", got)
@@ -532,6 +538,128 @@ func generateAppTS(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestEmbedSubtitlesSoftSuccess(t *testing.T) {
+	orig := embedEnglish
+	t.Cleanup(func() { embedEnglish = orig })
+
+	called := false
+	embedEnglish = func(_ context.Context, path string, opts subtitle.Options) error {
+		called = true
+		if path == "" || opts.Mode != subtitle.ModeSoft {
+			t.Fatalf("unexpected call path=%q mode=%q", path, opts.Mode)
+		}
+		return nil
+	}
+
+	var sb stringsBuilder
+	svc := &Service{
+		Out: ui.NewStdWriter(&sb, false),
+		Tel: telemetry.New(telemetry.Config{}),
+		Opts: Options{
+			Quiet:          false,
+			SubtitleMode:   string(subtitle.ModeSoft),
+			WhisperModel:   "mlx-community/whisper-medium",
+			SpokenLanguage: "ja",
+		},
+	}
+	if err := svc.embedSubtitles(context.Background(), "/tmp/clip.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("expected embedEnglish call")
+	}
+	if !strings.Contains(sb.String(), "soft") {
+		t.Fatalf("expected soft-sub message, got %q", sb.String())
+	}
+}
+
+func TestEmbedSubtitlesSkipsWhenSidecarExists(t *testing.T) {
+	orig := embedEnglish
+	t.Cleanup(func() { embedEnglish = orig })
+	called := false
+	embedEnglish = func(context.Context, string, subtitle.Options) error {
+		called = true
+		return nil
+	}
+
+	dir := t.TempDir()
+	video := filepath.Join(dir, "clip.mp4")
+	srt := filepath.Join(dir, "clip.en.srt")
+	if err := os.WriteFile(video, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srt, []byte("1\n00:00:00,000 --> 00:00:01,000\nHi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var sb stringsBuilder
+	svc := &Service{
+		Out:  ui.NewStdWriter(&sb, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{SubtitleMode: string(subtitle.ModeHard)},
+	}
+	if err := svc.embedSubtitles(context.Background(), video); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("must not re-embed when .en.srt exists")
+	}
+	if !strings.Contains(sb.String(), "already present") {
+		t.Fatalf("expected skip message, got %q", sb.String())
+	}
+}
+
+func TestEmbedSubtitlesHardSuccess(t *testing.T) {
+	orig := embedEnglish
+	t.Cleanup(func() { embedEnglish = orig })
+	embedEnglish = func(_ context.Context, _ string, opts subtitle.Options) error {
+		if opts.Mode != subtitle.ModeHard {
+			t.Fatalf("mode=%q", opts.Mode)
+		}
+		return nil
+	}
+	var sb stringsBuilder
+	svc := &Service{
+		Out:  ui.NewStdWriter(&sb, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{SubtitleMode: string(subtitle.ModeHard)},
+	}
+	if err := svc.embedSubtitles(context.Background(), "/tmp/clip.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sb.String(), "hardsubs") {
+		t.Fatalf("expected hardsubs message, got %q", sb.String())
+	}
+}
+
+func TestEmbedSubtitlesInvalidMode(t *testing.T) {
+	svc := &Service{
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{SubtitleMode: "burn"},
+	}
+	if err := svc.embedSubtitles(context.Background(), "/tmp/x.mp4"); err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+}
+
+func TestEmbedSubtitlesPropagatesError(t *testing.T) {
+	orig := embedEnglish
+	t.Cleanup(func() { embedEnglish = orig })
+	embedEnglish = func(context.Context, string, subtitle.Options) error {
+		return fmt.Errorf("boom")
+	}
+	svc := &Service{
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: true, SubtitleMode: string(subtitle.ModeSoft)},
+	}
+	err := svc.embedSubtitles(context.Background(), "/tmp/x.mp4")
+	if err == nil || !strings.Contains(err.Error(), "embed English subtitles") {
+		t.Fatalf("got %v", err)
+	}
 }
 
 type ioDiscard struct{}
