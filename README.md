@@ -61,7 +61,9 @@ and optional OpenTelemetry export to the JOOservices OpenObserve platform.
 ## Installation
 
 Prebuilt archives for macOS, Linux, and Windows (`amd64`/`arm64`) are attached
-to every [GitHub Release](https://github.com/jooservices/go-jabledownloader/releases):
+to every [GitHub Release](https://github.com/jooservices/go-jabledownloader/releases).
+macOS example (Linux archives contain the same `jabledownloader` binary;
+Windows archives contain `jabledownloader.exe`):
 
 ```bash
 tar -xzf jabledownloader_v4.2.0_darwin_arm64.tar.gz
