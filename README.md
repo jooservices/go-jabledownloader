@@ -8,9 +8,13 @@
 [![GitHub Release](https://img.shields.io/github/v/release/jooservices/go-jabledownloader?display_name=tag)](https://github.com/jooservices/go-jabledownloader/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A single-binary Go CLI for downloading videos from Jable.TV: Cloudflare
-bypass, parallel HLS segment downloads, an interactive picker, self-update,
-and optional OpenTelemetry export to the JOOservices OpenObserve platform.
+A single-binary Go CLI for downloading videos from multiple sites (Jable.TV,
+EPORNER, ...). The site is auto-detected from the input — no `--site` flag.
+Jable uses a Cloudflare-bypassing Chrome fetch and parallel HLS segment
+downloads; EPORNER is server-rendered, so it downloads direct MP4 files over
+plain HTTP with parallel Range chunks. Also includes an interactive picker,
+self-update, and optional OpenTelemetry export to the JOOservices OpenObserve
+platform.
 
 > [!WARNING]
 > **`v4.0.0` is a complete rebuild of the previous `jabledownloader` CLI (up to v3.x) and is NOT backward compatible.**
@@ -28,10 +32,14 @@ and optional OpenTelemetry export to the JOOservices OpenObserve platform.
 
 ## Features
 
+- Multi-site with auto-detection: `get` resolves the provider from the URL
+  (or Jable code); no `--site` flag
+- EPORNER: direct MP4 download (240p–1080p, h264/av1) over parallel Range
+  chunks with resume; no browser required
 - `get` a single video by URL or code (e.g. `jur-827`); skips existing files unless `--force`
 - `search`, `latest`, `hot` with an interactive multi-select picker and `--count`
 - Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
-- `--quality` to cap height (`best`, `360`, `480`, `720`, `1080`)
+- `--quality` to cap height (`best`, `240`, `360`, `480`, `720`, `1080`)
 - `--subtitle` — English subtitles via host `mlx_whisper` (`--task translate`)
 - `--subtitle-mode soft|hard` — soft = separate track + `.en.srt`; hard = burn-in
 - `--dry-run` preview with size estimates
@@ -40,8 +48,9 @@ and optional OpenTelemetry export to the JOOservices OpenObserve platform.
 
 ## Requirements
 
-- ffmpeg (runtime, for concat/fallback; also audio extract + subtitle embed when `--subtitle`)
-- Chrome/Chromium (scraping — bypasses Cloudflare)
+- ffmpeg (Jable HLS concat/fallback; also audio extract + subtitle embed when `--subtitle`)
+- Chrome/Chromium (Jable scraping only — bypasses Cloudflare). EPORNER and
+  other server-rendered sites need no browser
 - **Optional (host, `--subtitle` only):** [`mlx-whisper`](https://pypi.org/project/mlx-whisper/) on PATH
   (Apple Silicon). Install yourself — agents must not install packages:
   ```bash
@@ -82,6 +91,7 @@ make build   # host binary into bin/jabledownloader
 jabledownloader get jur-827
 jabledownloader get https://en.jable.tv/videos/abf-382/ --subtitle
 jabledownloader get abf-382 --subtitle --subtitle-mode hard
+jabledownloader get https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/ --quality 720
 jabledownloader search cute --dry-run
 jabledownloader latest --count 5
 ```
@@ -96,10 +106,10 @@ needs ffmpeg with libass).
 
 | Command | Purpose |
 | --- | --- |
-| `jabledownloader get <url\|code>` | Download a single video |
-| `jabledownloader search <query>` | Search and download (`--count`) |
-| `jabledownloader latest` | Download the latest videos (`--count`) |
-| `jabledownloader hot` | Download the trending videos (`--count`) |
+| `jabledownloader get <url\|code>` | Download a single video (site auto-detected from the input) |
+| `jabledownloader search <query>` | Search and download Jable videos (`--count`) |
+| `jabledownloader latest` | Download the latest Jable videos (`--count`) |
+| `jabledownloader hot` | Download the trending Jable videos (`--count`) |
 | `jabledownloader update` | Self-update from GitHub releases (`--check`) |
 | `jabledownloader config` | Show or set persisted settings |
 | `jabledownloader completion <shell>` | Shell completion for bash/zsh/fish/powershell |
@@ -134,10 +144,14 @@ variables above, and inspect at `http://localhost:5080` (stream
 Project rules live in [AGENTS.md](AGENTS.md). Key user-facing invariants:
 
 - Exit codes: `0` success, `1` error, `2` partial batch failure
-- Output naming: `<code>-<codec>.mp4` (codec from master playlist, h264 fallback);
-  `--subtitle` also writes `<code>-<codec>.en.srt`
-- Layered `internal/` packages; the HLS engine is pure (no UI/config/telemetry
-  dependencies); scraper tests use fixture data and never launch Chrome
+- Output naming: `<code>-<codec>.mp4` (codec from master playlist or the MP4
+  source, h264 fallback); `--subtitle` also writes `<code>-<codec>.en.srt`
+- Layered `internal/` packages: `internal/site` (provider abstraction +
+  auto-detect registry, `site/jable`, `site/eporner`), `internal/hls` and
+  `internal/direct` are pure engines (no UI/config/telemetry dependencies);
+  engine and site tests use fixture data and never launch Chrome
+- The site is auto-detected from the input; Jable additionally needs a
+  browser, EPORNER does not
 
 ## Documentation
 
