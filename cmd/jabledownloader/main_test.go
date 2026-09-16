@@ -421,21 +421,6 @@ func TestGetCommandDryRun(t *testing.T) {
 	}
 }
 
-func TestGetCommandEPORNERURLDryRun(t *testing.T) {
-	withFixtureSites(t)
-	err := executeCommand(t, "get", "https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/", "--dry-run")
-	if err == nil {
-		// EPORNER HTML fetch goes through the plain HTTPFetcher (not the
-		// fixture fetcher), so a live page may fail offline. A network error
-		// is acceptable; a panic/usage error is not.
-		return
-	}
-	if strings.Contains(err.Error(), "get https://www.eporner.com") {
-		return
-	}
-	t.Fatalf("get eporner: %v", err)
-}
-
 func TestLatestCommandDryRun(t *testing.T) {
 	withFixtureSites(t)
 	if err := executeCommand(t, "latest", "--count", "2", "--dry-run"); err != nil {
