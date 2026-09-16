@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/config"
+	"github.com/jooservices/go-jabledownloader/internal/direct"
+	"github.com/jooservices/go-jabledownloader/internal/hls"
 	"github.com/jooservices/go-jabledownloader/internal/site"
 	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/subtitle"
@@ -340,6 +342,16 @@ func TestConfirm(t *testing.T) {
 	if confirm("ok?") {
 		t.Fatal("expected confirm false")
 	}
+
+	r3, w3, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r3
+	_ = w3.Close()
+	if confirm("ok?") {
+		t.Fatal("expected confirm false on EOF")
+	}
 }
 
 func TestRunGetDownloads(t *testing.T) {
@@ -573,6 +585,186 @@ func TestDownloadVideoDirectSource(t *testing.T) {
 	}
 }
 
+func TestSpanWithNilTelemetry(t *testing.T) {
+	svc := &Service{}
+	ctx, end := svc.span(context.Background(), "test")
+	end()
+	if ctx == nil {
+		t.Fatal("expected non-nil ctx")
+	}
+}
+
+func TestSitesCloseIdempotent(t *testing.T) {
+	cleaned := 0
+	sites := NewSites(func(context.Context) (site.Fetcher, func(), error) {
+		return staticHTML{html: "<html></html>"}, func() { cleaned++ }, nil
+	})
+	if _, err := sites.Jable(); err != nil {
+		t.Fatalf("Jable: %v", err)
+	}
+	sites.Close()
+	sites.Close()
+	if cleaned != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleaned)
+	}
+}
+
+func TestToHLSEventMapping(t *testing.T) {
+	cases := []struct {
+		kind direct.EventKind
+		want hls.EventKind
+	}{
+		{direct.EventSegments, hls.EventSegments},
+		{direct.EventRetry, hls.EventRetry},
+		{direct.EventResume, hls.EventResume},
+	}
+	for _, tc := range cases {
+		ev := toHLSEvent(direct.Event{Kind: tc.kind, Done: 2, Total: 4, Bytes: 10, Failed: 1, Message: "m"})
+		if ev.Kind != tc.want || ev.Done != 2 || ev.Total != 4 || ev.Bytes != 10 || ev.Failed != 1 || ev.Message != "m" {
+			t.Fatalf("toHLSEvent(%v) = %+v", tc.kind, ev)
+		}
+	}
+}
+
+func TestDownloadVideoUnsupportedSourceKind(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{},
+	}
+	info := &site.VideoInfo{Code: "ep-x", Sources: []site.Source{{Kind: site.SourceKind(99), URL: "https://x", Codec: "h264"}}}
+	if _, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code)); err == nil {
+		t.Fatal("expected unsupported source kind error")
+	}
+}
+
+func TestRunMultiDownloadFailureCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	var sb stringsBuilder
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 1
+	st := fakeSite{info: &site.VideoInfo{Code: "ep-x", Sources: []site.Source{{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 720}}}}
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(&sb, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Yes: true, Force: true},
+	}
+
+	err := svc.RunMulti(context.Background(), "x", 1, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{{Code: "ep-x", Title: "T", URL: "https://www.eporner.com/video-x/y/"}}, nil
+		})
+	if err == nil {
+		t.Fatal("expected PlanError for failed download")
+	}
+	if _, ok := err.(*PlanError); !ok {
+		t.Fatalf("want PlanError, got %T", err)
+	}
+}
+
+func TestRunGetHLSDownloadError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	defer srv.Close()
+
+	html := `<html><head><title>E-001 - Jable.TV</title>
+<link rel="canonical" href="https://en.jable.tv/videos/e-001/"/>
+<script>var hlsUrl = '` + srv.URL + `/media.m3u8';</script></head></html>`
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 1
+	svc := &Service{
+		Config: cfg,
+		Sites: NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return staticHTML{html: html}, func() {}, nil
+		}),
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: true},
+	}
+	if err := svc.RunGet(context.Background(), "e-001"); err == nil {
+		t.Fatal("expected HLS download error")
+	}
+}
+
+func TestDownloadVideoDirectQuiet(t *testing.T) {
+	payload := []byte("quiet-content")
+	srv := rangeTestServer(payload)
+	defer srv.Close()
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 2
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Quiet: true},
+	}
+	info := &site.VideoInfo{
+		Code: "ep-q",
+		Sources: []site.Source{
+			{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 240},
+		},
+	}
+
+	vf, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code))
+	if err != nil {
+		t.Fatalf("downloadVideo: %v", err)
+	}
+	if vf.Size != int64(len(payload)) {
+		t.Fatalf("size = %d, want %d", vf.Size, len(payload))
+	}
+}
+
+func TestDownloadVideoDirectTTY(t *testing.T) {
+	payload := []byte("tty-content")
+	srv := rangeTestServer(payload)
+	defer srv.Close()
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 2
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{TTY: true},
+	}
+	info := &site.VideoInfo{
+		Code: "ep-t",
+		Sources: []site.Source{
+			{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 240},
+		},
+	}
+
+	vf, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code))
+	if err != nil {
+		t.Fatalf("downloadVideo: %v", err)
+	}
+	if vf.Size != int64(len(payload)) {
+		t.Fatalf("size = %d, want %d", vf.Size, len(payload))
+	}
+}
+
 func TestPickSourceMaxHeight(t *testing.T) {
 	sources := []site.Source{
 		{Kind: site.SourceDirect, Height: 240, Codec: "h264"},
@@ -595,6 +787,58 @@ func TestPickSourceMaxHeight(t *testing.T) {
 	}
 	if _, err := pickSource([]site.Source{}, 0); err == nil {
 		t.Fatal("expected error for empty sources")
+	}
+}
+
+func TestSitesForAndLazyBrowser(t *testing.T) {
+	calls := 0
+	sites := NewSites(func(context.Context) (site.Fetcher, func(), error) {
+		calls++
+		return staticHTML{html: "<html></html>"}, func() {}, nil
+	})
+
+	st, err := sites.For("https://www.eporner.com/video-ABC123/slug/")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	if st.Name() != "eporner" {
+		t.Fatalf("site = %q", st.Name())
+	}
+	if calls != 0 {
+		t.Fatalf("browser must be lazy for eporner, calls=%d", calls)
+	}
+
+	j, err := sites.Jable()
+	if err != nil {
+		t.Fatalf("Jable: %v", err)
+	}
+	if j.Name() != "jable" {
+		t.Fatalf("site = %q", j.Name())
+	}
+	if calls != 1 {
+		t.Fatalf("browser calls = %d, want 1", calls)
+	}
+
+	if _, err := sites.Jable(); err != nil {
+		t.Fatalf("second Jable: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("browser must be cached, calls=%d", calls)
+	}
+
+	sites.Close()
+	if sites.httpClient() == nil {
+		t.Fatal("expected http client")
+	}
+}
+
+func TestSitesBuildJableNoFactory(t *testing.T) {
+	sites := NewSites(nil)
+	if _, err := sites.Jable(); err == nil {
+		t.Fatal("expected error when no browser factory")
+	}
+	if _, err := sites.For("not a code"); err == nil {
+		t.Fatal("expected unsupported input error")
 	}
 }
 

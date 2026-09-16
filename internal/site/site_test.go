@@ -2,6 +2,9 @@ package site_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/site"
@@ -81,5 +84,76 @@ func TestNewKnownSites(t *testing.T) {
 		if st.Name() != name {
 			t.Fatalf("site name = %q, want %q", st.Name(), name)
 		}
+	}
+}
+
+func TestNewHeaderClientSetsHeaders(t *testing.T) {
+	var ua, ref, accept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua, ref, accept = r.Header.Get("User-Agent"), r.Header.Get("Referer"), r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := site.NewHeaderClient("https://example.test/")
+	resp, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+
+	if ua == "" || ref != "https://example.test/" || accept == "" {
+		t.Fatalf("headers ua=%q ref=%q accept=%q", ua, ref, accept)
+	}
+}
+
+func TestNewHeaderClientRedirectEncodesSpaces(t *testing.T) {
+	var seenQuery string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/f.mp4?dload=hello world x.mp4", http.StatusFound)
+	}))
+	defer src.Close()
+
+	c := site.NewHeaderClient("https://example.test/")
+	resp, err := c.Get(src.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+
+	if seenQuery != "dload=hello%20world%20x.mp4" {
+		t.Fatalf("redirect query = %q, want space-encoded", seenQuery)
+	}
+}
+
+func TestHTTPFetcher(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok":
+			fmt.Fprint(w, "<html>ok</html>")
+		case "/err":
+			http.Error(w, "nope", http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	f := site.NewHTTPFetcher(&http.Client{})
+	body, err := f.FetchHTML(context.Background(), srv.URL+"/ok", site.FetchReady)
+	if err != nil || body != "<html>ok</html>" {
+		t.Fatalf("FetchHTML = %q, %v", body, err)
+	}
+	if _, err := f.FetchHTML(context.Background(), srv.URL+"/err", site.FetchReady); err == nil {
+		t.Fatal("expected error for non-200")
+	}
+	if _, err := f.FetchHTML(context.Background(), "http://127.0.0.1:1/x", site.FetchReady); err == nil {
+		t.Fatal("expected error for unreachable")
 	}
 }

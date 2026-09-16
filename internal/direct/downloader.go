@@ -290,7 +290,8 @@ func (d *Downloader) chunkPlan(size int64) []chunk {
 	for i := int64(0); i < n; i++ {
 		start := i * chunkSize
 		end := start + chunkSize - 1
-		if end > size-1 {
+		if i == n-1 {
+			// Cover any remainder that integer division dropped.
 			end = size - 1
 		}
 		if start > end {
@@ -311,16 +312,34 @@ func (d *Downloader) downloadRange(ctx context.Context, url string, start, end i
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			msg := err.Error()
-			if strings.Contains(msg, "429") {
-				d.emit(Event{Kind: EventRetry, Message: httpHint(429)})
-			}
+			d.emit(Event{Kind: EventRetry, Message: retryHint(err)})
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 			continue
 		}
 		return nil
 	}
 	return fmt.Errorf("download range %d-%d: %w", start, end, lastErr)
+}
+
+// retryHint returns a short human message for a failed chunk attempt.
+func retryHint(err error) string {
+	if err == nil {
+		return "transient failure — retrying"
+	}
+	if hint := httpHint(statusCode(err)); hint != "" {
+		return hint
+	}
+	return "transient failure — retrying"
+}
+
+func statusCode(err error) int {
+	// extract "http status N" from wrapped error text
+	m := strings.LastIndex(err.Error(), "http status ")
+	if m < 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(err.Error()[m+len("http status "):]))
+	return n
 }
 
 func (d *Downloader) fetchRange(ctx context.Context, url string, start, end int64, outPath string) error {
