@@ -75,7 +75,7 @@ macOS example (Linux archives contain the same `jabledownloader` binary;
 Windows archives contain `jabledownloader.exe`):
 
 ```bash
-tar -xzf jabledownloader_v4.2.0_darwin_arm64.tar.gz
+tar -xzf jabledownloader_v4.3.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 ```
 
