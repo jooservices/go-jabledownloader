@@ -14,11 +14,15 @@ import (
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
 	"github.com/jooservices/go-jabledownloader/internal/config"
-	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/site"
+	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
 	"github.com/jooservices/go-jabledownloader/internal/update"
+
+	// Register the EPORNER site (init-time registration).
+	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
 )
 
 // version is stamped at build time via
@@ -107,7 +111,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.noColor, "no-color", false, "Disable ANSI colors")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.verbose, "verbose", "v", false, "Verbose output (URLs, HLS links, codec)")
 	rootCmd.PersistentFlags().BoolVarP(&rootFlags.force, "force", "f", false, "Re-download even if the video file already exists")
-	rootCmd.PersistentFlags().StringVar(&rootFlags.quality, "quality", "best", "Max video height: best, 360, 480, 720, 1080")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.quality, "quality", "best", "Max video height: best, 240, 360, 480, 720, 1080")
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.subtitle, "subtitle", false, "Embed English subtitles via host mlx_whisper (translate)")
 	rootCmd.PersistentFlags().StringVar(&rootFlags.subtitleMode, "subtitle-mode", "soft", "Subtitle style: soft (separate track) or hard (burn-in)")
 	rootCmd.PersistentFlags().StringVar(&rootFlags.whisperModel, "whisper-model", "", "mlx_whisper model (default: mlx-community/whisper-medium)")
@@ -159,10 +163,18 @@ func newSearchCmd() *cobra.Command {
 				return err
 			}
 			defer cleanup()
+			st, err := svc.Sites.Jable()
+			if err != nil {
+				return err
+			}
+			lister, ok := st.(site.Lister)
+			if !ok {
+				return fmt.Errorf("jable does not support listings")
+			}
 			query := strings.Join(args, " ")
-			return svc.RunMulti(cmd.Context(), "search: "+query, searchFlags.count,
-				func(ctx context.Context, page int) ([]scraper.VideoEntry, error) {
-					return svc.Client.SearchVideos(ctx, query, page)
+			return svc.RunMulti(cmd.Context(), "search: "+query, searchFlags.count, st,
+				func(ctx context.Context, page int) ([]site.VideoEntry, error) {
+					return lister.Search(ctx, query, page)
 				})
 		},
 	}
@@ -182,7 +194,15 @@ func newLatestCmd() *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return svc.RunMulti(cmd.Context(), "latest", latestFlags.count, svc.Client.LatestVideos)
+			st, err := svc.Sites.Jable()
+			if err != nil {
+				return err
+			}
+			lister, ok := st.(site.Lister)
+			if !ok {
+				return fmt.Errorf("jable does not support listings")
+			}
+			return svc.RunMulti(cmd.Context(), "latest", latestFlags.count, st, lister.Latest)
 		},
 	}
 	cmd.Flags().IntVarP(&latestFlags.count, "count", "n", 10, "Number of videos to download")
@@ -201,7 +221,15 @@ func newHotCmd() *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return svc.RunMulti(cmd.Context(), "hot", hotFlags.count, svc.Client.HotVideos)
+			st, err := svc.Sites.Jable()
+			if err != nil {
+				return err
+			}
+			lister, ok := st.(site.Lister)
+			if !ok {
+				return fmt.Errorf("jable does not support listings")
+			}
+			return svc.RunMulti(cmd.Context(), "hot", hotFlags.count, st, lister.Hot)
 		},
 	}
 	cmd.Flags().IntVarP(&hotFlags.count, "count", "n", 10, "Number of videos to download")
@@ -332,25 +360,33 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 	}
 }
 
-// newBrowser launches Chrome for scrape commands. Tests override to avoid a live browser.
-var newBrowser = scraper.NewBrowser
+// newBrowser launches Chrome for Jable scrape commands. Tests override to
+// avoid a live browser.
+var newBrowser = jable.NewBrowser
 
-// newScrapeService assembles config, telemetry, a Chrome-backed scraper and
-// the app service. The returned cleanup releases the browser.
+// newSites builds the site registry used by scrape commands. Tests override
+// to inject fixture fetchers.
+var newSites = app.NewSites
+
+// newScrapeService assembles config, telemetry, a site registry and the app
+// service. The Jable browser starts lazily; the returned cleanup releases it.
 func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
 	svc, tel, err := baseService()
 	if err != nil {
 		return nil, func() {}, err
 	}
 
-	browser, err := newBrowser(cmd.Context())
-	if err != nil {
-		return nil, func() {}, fmt.Errorf("launch browser: %w\n\n  Chrome/Chromium is required to bypass Cloudflare protection.\n  Install from: https://www.google.com/chrome/", err)
-	}
-	svc.Client = scraper.NewClient(browser)
+	sites := newSites(func(ctx context.Context) (site.Fetcher, func(), error) {
+		browser, err := newBrowser(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("launch browser: %w\n\n  Chrome/Chromium is required to bypass Jable Cloudflare protection.\n  Install from: https://www.google.com/chrome/", err)
+		}
+		return browser, browser.Close, nil
+	})
+	svc.Sites = sites
 
 	cleanup := func() {
-		browser.Close()
+		sites.Close()
 		tel.Shutdown(cmd.Context())
 	}
 	return svc, cleanup, nil
@@ -419,8 +455,8 @@ func parseQuality(raw string) (int, error) {
 	}
 	s = strings.TrimSuffix(s, "p")
 	n, err := strconv.Atoi(s)
-	if err != nil || (n != 360 && n != 480 && n != 720 && n != 1080) {
-		return 0, fmt.Errorf("invalid --quality %q (use best, 360, 480, 720, or 1080)", raw)
+	if err != nil || (n != 240 && n != 360 && n != 480 && n != 720 && n != 1080) {
+		return 0, fmt.Errorf("invalid --quality %q (use best, 240, 360, 480, 720, or 1080)", raw)
 	}
 	return n, nil
 }
