@@ -594,6 +594,132 @@ func TestSpanWithNilTelemetry(t *testing.T) {
 	}
 }
 
+type fakeGallerySite struct {
+	gallery *site.Gallery
+}
+
+func (fakeGallerySite) Name() string { return "javphotos" }
+func (fakeGallerySite) ResolveInput(context.Context, string) (string, error) {
+	return "https://jav.photos/free/x", nil
+}
+func (fakeGallerySite) FetchInfo(context.Context, string) (*site.VideoInfo, error) {
+	return nil, fmt.Errorf("no video")
+}
+func (f fakeGallerySite) FetchGallery(context.Context, string) (*site.Gallery, error) {
+	return f.gallery, nil
+}
+
+func TestRunGetGalleryDryRun(t *testing.T) {
+	var sb stringsBuilder
+	gs := fakeGallerySite{gallery: &site.Gallery{
+		Code:   "g1",
+		Title:  "Gallery One",
+		Photos: []site.Photo{{ID: "p1", ImageURL: "https://x/p1.jpg"}},
+	}}
+	svc := &Service{
+		Config: config.Defaults(),
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(&sb, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{DryRun: true},
+	}
+	if err := svc.runGetGallery(context.Background(), gs, gs, "https://jav.photos/free/g1"); err != nil {
+		t.Fatalf("runGetGallery: %v", err)
+	}
+	out := sb.String()
+	if !strings.Contains(out, "Dry run") || !strings.Contains(out, "Gallery One") {
+		t.Fatalf("output: %q", out)
+	}
+}
+
+func TestRunGetGalleryDownloadsPhotos(t *testing.T) {
+	payload := []byte("photo-payload")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	gs := fakeGallerySite{gallery: &site.Gallery{
+		Code:  "g2",
+		Title: "Gallery Two",
+		Photos: []site.Photo{
+			{ID: "p1", ImageURL: srv.URL + "/p1.jpg"},
+			{ID: "p2", ImageURL: srv.URL + "/p2.jpg"},
+		},
+	}}
+
+	var sb stringsBuilder
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(&sb, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{},
+	}
+	if err := svc.runGetGallery(context.Background(), gs, gs, "https://jav.photos/free/g2"); err != nil {
+		t.Fatalf("runGetGallery: %v", err)
+	}
+
+	for _, name := range []string{"001-p1.jpg", "002-p2.jpg"} {
+		data, err := os.ReadFile(filepath.Join(cfg.OutputDir, "g2", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if string(data) != string(payload) {
+			t.Fatalf("%s content mismatch", name)
+		}
+	}
+}
+
+func TestRunGetGalleryDownloadErrorCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nope", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	gs := fakeGallerySite{gallery: &site.Gallery{
+		Code:  "g3",
+		Title: "Gallery Three",
+		Photos: []site.Photo{
+			{ID: "p1", ImageURL: srv.URL + "/p1.jpg"},
+		},
+	}}
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Quiet: true},
+	}
+	err := svc.runGetGallery(context.Background(), gs, gs, "https://jav.photos/free/g3")
+	if err == nil {
+		t.Fatal("expected PlanError for failed download")
+	}
+	if _, ok := err.(*PlanError); !ok {
+		t.Fatalf("want PlanError, got %T", err)
+	}
+}
+
+func TestExtOf(t *testing.T) {
+	cases := map[string]string{
+		"https://x/p1.jpg":  ".jpg",
+		"https://x/a/b.png": ".png",
+		"https://x/noext":   ".jpg",
+		"https://x/":        ".jpg",
+	}
+	for in, want := range cases {
+		if got := extOf(in); got != want {
+			t.Errorf("extOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSitesCloseIdempotent(t *testing.T) {
 	cleaned := 0
 	sites := NewSites(func(context.Context) (site.Fetcher, func(), error) {
