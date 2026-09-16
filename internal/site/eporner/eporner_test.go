@@ -68,6 +68,30 @@ func TestFetchInfoMissingSources(t *testing.T) {
 	}
 }
 
+type htmlFetcher struct {
+	html string
+}
+
+func (f htmlFetcher) FetchHTML(_ context.Context, _ string, _ site.FetchMode) (string, error) {
+	return f.html, nil
+}
+
+func TestFetchInfoTitleWithoutSuffix(t *testing.T) {
+	c := NewClient(htmlFetcher{html: `<html><head><title>Plain Title</title></head><body>` +
+		`<a href="/dload/ABC123/720/9-720p.mp4">x</a></body></html>`})
+
+	info, err := c.FetchInfo(context.Background(), "https://www.eporner.com/video-ABC123/slug/")
+	if err != nil {
+		t.Fatalf("FetchInfo: %v", err)
+	}
+	if info.Title != "Plain Title" {
+		t.Fatalf("title = %q", info.Title)
+	}
+	if len(info.Sources) != 1 || info.Sources[0].Height != 720 {
+		t.Fatalf("sources = %+v", info.Sources)
+	}
+}
+
 func TestResolveInput(t *testing.T) {
 	c := NewClient(&fileFetcher{file: "video_page.html"})
 	ok := "https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/"

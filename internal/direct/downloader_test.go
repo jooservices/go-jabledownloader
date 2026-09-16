@@ -418,6 +418,48 @@ func TestDownloadRangeContextCancel(t *testing.T) {
 	}
 }
 
+func TestDownloadChunkedNoLength(t *testing.T) {
+	body := []byte("chunked-content-without-length")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	dl := NewDownloader(t.TempDir())
+	vf, err := dl.Download(context.Background(), "v", "h264", srv.URL)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if vf.Size != int64(len(body)) {
+		t.Fatalf("size = %d, want %d", vf.Size, len(body))
+	}
+}
+
+func TestConcatChunksRenameError(t *testing.T) {
+	outDir := t.TempDir()
+	segDir := filepath.Join(outDir, ".segments")
+	if err := os.MkdirAll(segDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segDir, "seg_000000"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(outDir, "out.mp4")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dl := NewDownloader(outDir)
+	plan := []chunk{{start: 0, end: 0, size: 1}}
+	if err := dl.concatChunks(context.Background(), segDir, plan, target); err == nil {
+		t.Fatal("expected rename error when target is a directory")
+	}
+}
+
 func TestHTTPHint(t *testing.T) {
 	if httpHint(http.StatusTooManyRequests) == "" {
 		t.Fatal("expected hint for 429")

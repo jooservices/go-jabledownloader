@@ -6,13 +6,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
+	"github.com/jooservices/go-jabledownloader/internal/site"
 	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/update"
+
+	// Register EPORNER so site auto-detection resolves its URLs.
+	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
 )
 
 func TestRootCommandHasCommands(t *testing.T) {
@@ -361,5 +366,93 @@ func TestNewScrapeServiceErrorSurfacesOnJable(t *testing.T) {
 	defer cleanup()
 	if _, err := svc.Sites.Jable(); err == nil {
 		t.Fatal("expected error when jable requests a browser")
+	}
+}
+
+type fixtureFetcher struct {
+	video  string
+	browse string
+}
+
+func (f *fixtureFetcher) FetchHTML(_ context.Context, url string, _ site.FetchMode) (string, error) {
+	if strings.Contains(url, "/videos/") {
+		return f.video, nil
+	}
+	return f.browse, nil
+}
+
+func loadJableFixture(name string) string {
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "site", "jable", "testdata", name))
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+func withFixtureSites(t *testing.T) {
+	t.Helper()
+	old := newSites
+	t.Cleanup(func() { newSites = old })
+	newSites = func(_ func(context.Context) (site.Fetcher, func(), error)) *app.Sites {
+		return app.NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return &fixtureFetcher{
+				video:  loadJableFixture("video_page.html"),
+				browse: loadJableFixture("browse_page.html"),
+			}, func() {}, nil
+		})
+	}
+}
+
+func executeCommand(t *testing.T, args ...string) error {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	rootFlags.noColor = true
+	root := newRootCmd()
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs(args)
+	return root.Execute()
+}
+
+func TestGetCommandDryRun(t *testing.T) {
+	withFixtureSites(t)
+	if err := executeCommand(t, "get", "jur-827", "--dry-run"); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+}
+
+func TestGetCommandEPORNERURLDryRun(t *testing.T) {
+	withFixtureSites(t)
+	err := executeCommand(t, "get", "https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/", "--dry-run")
+	if err == nil {
+		// EPORNER HTML fetch goes through the plain HTTPFetcher (not the
+		// fixture fetcher), so a live page may fail offline. A network error
+		// is acceptable; a panic/usage error is not.
+		return
+	}
+	if strings.Contains(err.Error(), "get https://www.eporner.com") {
+		return
+	}
+	t.Fatalf("get eporner: %v", err)
+}
+
+func TestLatestCommandDryRun(t *testing.T) {
+	withFixtureSites(t)
+	if err := executeCommand(t, "latest", "--count", "2", "--dry-run"); err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+}
+
+func TestHotCommandDryRun(t *testing.T) {
+	withFixtureSites(t)
+	if err := executeCommand(t, "hot", "--count", "2", "--dry-run"); err != nil {
+		t.Fatalf("hot: %v", err)
+	}
+}
+
+func TestSearchCommandDryRun(t *testing.T) {
+	withFixtureSites(t)
+	if err := executeCommand(t, "search", "cute", "--count", "2", "--dry-run"); err != nil {
+		t.Fatalf("search: %v", err)
 	}
 }

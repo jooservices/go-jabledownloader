@@ -364,6 +364,10 @@ func newCompletionCmd(root *cobra.Command) *cobra.Command {
 // avoid a live browser.
 var newBrowser = jable.NewBrowser
 
+// newSites builds the site registry used by scrape commands. Tests override
+// to inject fixture fetchers.
+var newSites = app.NewSites
+
 // newScrapeService assembles config, telemetry, a site registry and the app
 // service. The Jable browser starts lazily; the returned cleanup releases it.
 func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
@@ -372,7 +376,7 @@ func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
 		return nil, func() {}, err
 	}
 
-	sites := app.NewSites(func(ctx context.Context) (site.Fetcher, func(), error) {
+	sites := newSites(func(ctx context.Context) (site.Fetcher, func(), error) {
 		browser, err := newBrowser(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("launch browser: %w\n\n  Chrome/Chromium is required to bypass Jable Cloudflare protection.\n  Install from: https://www.google.com/chrome/", err)
