@@ -30,14 +30,10 @@ func init() {
 }
 
 // Client adapts Jav Photos to the site.Site and site.GallerySite contracts.
-type Client struct {
-	fetcher site.Fetcher
-}
+type Client struct{ fetcher site.Fetcher }
 
 // NewClient builds the Jav Photos client on top of a HTML fetcher.
-func NewClient(fetcher site.Fetcher) *Client {
-	return &Client{fetcher: fetcher}
-}
+func NewClient(fetcher site.Fetcher) *Client { return &Client{fetcher: fetcher} }
 
 // Name returns the site identifier.
 func (c *Client) Name() string {
