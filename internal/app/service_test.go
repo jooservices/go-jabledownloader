@@ -8,14 +8,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/config"
-	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/direct"
+	"github.com/jooservices/go-jabledownloader/internal/hls"
+	"github.com/jooservices/go-jabledownloader/internal/site"
+	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
+
+	// Register EPORNER so site.DetectName resolves its URLs.
+	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
 )
 
 func TestFindExistingVideo(t *testing.T) {
@@ -67,7 +74,7 @@ func TestSetupContext(t *testing.T) {
 }
 
 func TestPickVideosNonInteractiveSelectsAll(t *testing.T) {
-	videos := []scraper.VideoEntry{
+	videos := []site.VideoEntry{
 		{Code: "jur-001", Title: "One", Duration: "1:00:00"},
 		{Code: "abc-002", Title: "Two"},
 	}
@@ -97,12 +104,18 @@ type fileFetcher struct {
 	file string
 }
 
-func (f *fileFetcher) FetchHTML(_ context.Context, _ string, _ scraper.FetchMode) (string, error) {
-	data, err := os.ReadFile(filepath.Join("..", "scraper", "testdata", f.file))
+func (f *fileFetcher) FetchHTML(_ context.Context, _ string, _ site.FetchMode) (string, error) {
+	data, err := os.ReadFile(filepath.Join("..", "site", "jable", "testdata", f.file))
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func jableSites(file string) *Sites {
+	return NewSites(func(context.Context) (site.Fetcher, func(), error) {
+		return &fileFetcher{file: file}, func() {}, nil
+	})
 }
 
 func TestRunGetDryRun(t *testing.T) {
@@ -111,7 +124,7 @@ func TestRunGetDryRun(t *testing.T) {
 	cfg.OutputDir = t.TempDir()
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(&fileFetcher{file: "video_page.html"}),
+		Sites:  jableSites("video_page.html"),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{DryRun: true, Quiet: false, Verbose: true},
@@ -132,6 +145,7 @@ func TestRunGetDryRun(t *testing.T) {
 func TestRunGetInvalidInput(t *testing.T) {
 	svc := &Service{
 		Config: config.Defaults(),
+		Sites:  NewSites(nil),
 		Out:    ui.NewStdWriter(ioDiscard{}, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Quiet: true},
@@ -154,7 +168,7 @@ func TestRunGetSkipsExisting(t *testing.T) {
 	}
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(&fileFetcher{file: "video_page.html"}),
+		Sites:  jableSites("video_page.html"),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Quiet: true},
@@ -183,7 +197,7 @@ func TestRunGetSkipsIncompleteWhenSegmentsExist(t *testing.T) {
 	}
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(&fileFetcher{file: "video_page.html"}),
+		Sites:  jableSites("video_page.html"),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Quiet: true, DryRun: true},
@@ -203,17 +217,15 @@ func TestRunMultiDryRun(t *testing.T) {
 	var sb stringsBuilder
 	cfg := config.Defaults()
 	cfg.OutputDir = t.TempDir()
+	st := jable.NewClient(&fileFetcher{file: "browse_page.html"})
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(&fileFetcher{file: "browse_page.html"}),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{DryRun: true, Yes: true},
 	}
 
-	err := svc.RunMulti(context.Background(), "latest", 2, func(ctx context.Context, page int) ([]scraper.VideoEntry, error) {
-		return svc.Client.LatestVideos(ctx, page)
-	})
+	err := svc.RunMulti(context.Background(), "latest", 2, st, st.Latest)
 	if err != nil {
 		t.Fatalf("RunMulti: %v", err)
 	}
@@ -236,24 +248,25 @@ func TestRunMultiSkipExisting(t *testing.T) {
 	var sb stringsBuilder
 	cfg := config.Defaults()
 	cfg.OutputDir = outDir
+	st := jable.NewClient(&fileFetcher{file: "video_page.html"})
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(&fileFetcher{file: "video_page.html"}),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Yes: true, Quiet: false},
 	}
 
-	err := svc.RunMulti(context.Background(), "fixture", 1, func(_ context.Context, page int) ([]scraper.VideoEntry, error) {
-		if page > 1 {
-			return nil, nil
-		}
-		return []scraper.VideoEntry{{
-			Code:  code,
-			Title: "Existing",
-			URL:   "https://en.jable.tv/videos/jur-001/",
-		}}, nil
-	})
+	err := svc.RunMulti(context.Background(), "fixture", 1, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{{
+				Code:  code,
+				Title: "Existing",
+				URL:   "https://en.jable.tv/videos/jur-001/",
+			}}, nil
+		})
 	if err != nil {
 		t.Fatalf("RunMulti: %v", err)
 	}
@@ -264,15 +277,17 @@ func TestRunMultiSkipExisting(t *testing.T) {
 
 func TestRunMultiFetcherError(t *testing.T) {
 	var sb stringsBuilder
+	st := jable.NewClient(staticHTML{html: "<html></html>"})
 	svc := &Service{
 		Config: config.Defaults(),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{DryRun: true, Yes: true},
 	}
-	err := svc.RunMulti(context.Background(), "broken", 5, func(_ context.Context, _ int) ([]scraper.VideoEntry, error) {
-		return nil, context.Canceled
-	})
+	err := svc.RunMulti(context.Background(), "broken", 5, st,
+		func(_ context.Context, _ int) ([]site.VideoEntry, error) {
+			return nil, context.Canceled
+		})
 	if err != nil {
 		t.Fatalf("RunMulti should dry-run with empty list, got %v", err)
 	}
@@ -285,7 +300,7 @@ func TestPrintPlanAndSpan(t *testing.T) {
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 	}
-	svc.printPlan([]scraper.VideoEntry{
+	svc.printPlan([]site.VideoEntry{
 		{Code: "a", Title: "One", Duration: "10:00"},
 		{Code: "b", Title: "Two"},
 	})
@@ -327,6 +342,16 @@ func TestConfirm(t *testing.T) {
 	if confirm("ok?") {
 		t.Fatal("expected confirm false")
 	}
+
+	r3, w3, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r3
+	_ = w3.Close()
+	if confirm("ok?") {
+		t.Fatal("expected confirm false on EOF")
+	}
 }
 
 func TestRunGetDownloads(t *testing.T) {
@@ -344,10 +369,12 @@ func TestRunGetDownloads(t *testing.T) {
 	cfg.WorkerCount = 1
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(staticHTML{html: html}),
-		Out:    ui.NewStdWriter(&sb, false),
-		Tel:    telemetry.New(telemetry.Config{}),
-		Opts:   Options{Quiet: false, Verbose: true, TTY: false},
+		Sites: NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return staticHTML{html: html}, func() {}, nil
+		}),
+		Out:  ui.NewStdWriter(&sb, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: false, Verbose: true, TTY: false},
 	}
 	if err := svc.RunGet(context.Background(), "dl-001"); err != nil {
 		t.Fatalf("RunGet: %v", err)
@@ -370,10 +397,12 @@ func TestRunGetQuietTTY(t *testing.T) {
 	cfg.WorkerCount = 1
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(staticHTML{html: html}),
-		Out:    ui.NewStdWriter(ioDiscard{}, false),
-		Tel:    telemetry.New(telemetry.Config{}),
-		Opts:   Options{Quiet: true, TTY: true},
+		Sites: NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return staticHTML{html: html}, func() {}, nil
+		}),
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: true, TTY: true},
 	}
 	if err := svc.RunGet(context.Background(), "q-001"); err != nil {
 		t.Fatalf("RunGet: %v", err)
@@ -392,23 +421,24 @@ func TestRunMultiDownloadAndFail(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.OutputDir = t.TempDir()
 	cfg.WorkerCount = 1
+	st := jable.NewClient(staticHTML{html: html})
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(staticHTML{html: html}),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Yes: true, Force: true},
 	}
 
-	err := svc.RunMulti(context.Background(), "batch", 2, func(_ context.Context, page int) ([]scraper.VideoEntry, error) {
-		if page > 1 {
-			return nil, nil
-		}
-		return []scraper.VideoEntry{
-			{Code: "m-001", Title: "One", URL: "https://en.jable.tv/videos/m-001/"},
-			{Code: "bad", Title: "Bad", URL: "https://en.jable.tv/videos/bad/"},
-		}, nil
-	})
+	err := svc.RunMulti(context.Background(), "batch", 2, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{
+				{Code: "m-001", Title: "One", URL: "https://en.jable.tv/videos/m-001/"},
+				{Code: "bad", Title: "Bad", URL: "https://en.jable.tv/videos/bad/"},
+			}, nil
+		})
 	// bad entry fails fetch (same HTML still has m-001 code) — may still partial-fail
 	_ = err
 }
@@ -419,7 +449,7 @@ func TestPickVideosDryRun(t *testing.T) {
 		Out:    ui.NewStdWriter(ioDiscard{}, false),
 		Opts:   Options{DryRun: true},
 	}
-	got, err := svc.pickVideos([]scraper.VideoEntry{{Code: "a", Title: "A"}})
+	got, err := svc.pickVideos([]site.VideoEntry{{Code: "a", Title: "A"}})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("got=%v err=%v", got, err)
 	}
@@ -427,15 +457,17 @@ func TestPickVideosDryRun(t *testing.T) {
 
 func TestRunMultiEmptyAfterScan(t *testing.T) {
 	var sb stringsBuilder
+	st := jable.NewClient(staticHTML{html: "<html></html>"})
 	svc := &Service{
 		Config: config.Defaults(),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Yes: true},
 	}
-	err := svc.RunMulti(context.Background(), "empty", 3, func(_ context.Context, _ int) ([]scraper.VideoEntry, error) {
-		return nil, nil
-	})
+	err := svc.RunMulti(context.Background(), "empty", 3, st,
+		func(_ context.Context, _ int) ([]site.VideoEntry, error) {
+			return nil, nil
+		})
 	if err != nil {
 		t.Fatalf("RunMulti: %v", err)
 	}
@@ -445,18 +477,20 @@ func TestRunMultiEmptyAfterScan(t *testing.T) {
 }
 
 func TestRunMultiDefaultCount(t *testing.T) {
+	st := jable.NewClient(staticHTML{html: "<html></html>"})
 	svc := &Service{
 		Config: config.Defaults(),
 		Out:    ui.NewStdWriter(ioDiscard{}, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{DryRun: true, Yes: true},
 	}
-	if err := svc.RunMulti(context.Background(), "c", 0, func(_ context.Context, page int) ([]scraper.VideoEntry, error) {
-		if page > 1 {
-			return nil, nil
-		}
-		return []scraper.VideoEntry{{Code: "x-1", Title: "T", URL: "https://en.jable.tv/videos/x-1/"}}, nil
-	}); err != nil {
+	if err := svc.RunMulti(context.Background(), "c", 0, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{{Code: "x-1", Title: "T", URL: "https://en.jable.tv/videos/x-1/"}}, nil
+		}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -464,10 +498,12 @@ func TestRunMultiDefaultCount(t *testing.T) {
 func TestFetchInfoError(t *testing.T) {
 	svc := &Service{
 		Config: config.Defaults(),
-		Client: scraper.NewClient(staticHTML{html: "<html><body>no hls</body></html>"}),
-		Out:    ui.NewStdWriter(ioDiscard{}, false),
-		Tel:    telemetry.New(telemetry.Config{}),
-		Opts:   Options{Quiet: true},
+		Sites: NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return staticHTML{html: "<html><body>no hls</body></html>"}, func() {}, nil
+		}),
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: true},
 	}
 	if err := svc.RunGet(context.Background(), "jur-001"); err == nil {
 		t.Fatal("expected fetch error")
@@ -478,19 +514,20 @@ func TestRunMultiFetchInfoFailCounts(t *testing.T) {
 	var sb stringsBuilder
 	cfg := config.Defaults()
 	cfg.OutputDir = t.TempDir()
+	st := jable.NewClient(staticHTML{html: "<html></html>"})
 	svc := &Service{
 		Config: cfg,
-		Client: scraper.NewClient(staticHTML{html: "<html></html>"}),
 		Out:    ui.NewStdWriter(&sb, false),
 		Tel:    telemetry.New(telemetry.Config{}),
 		Opts:   Options{Yes: true, Force: true},
 	}
-	err := svc.RunMulti(context.Background(), "fail", 1, func(_ context.Context, page int) ([]scraper.VideoEntry, error) {
-		if page > 1 {
-			return nil, nil
-		}
-		return []scraper.VideoEntry{{Code: "f-001", Title: "F", URL: "https://en.jable.tv/videos/f-001/"}}, nil
-	})
+	err := svc.RunMulti(context.Background(), "fail", 1, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{{Code: "f-001", Title: "F", URL: "https://en.jable.tv/videos/f-001/"}}, nil
+		})
 	if err == nil {
 		t.Fatal("expected PlanError")
 	}
@@ -499,9 +536,315 @@ func TestRunMultiFetchInfoFailCounts(t *testing.T) {
 	}
 }
 
+type fakeSite struct {
+	info *site.VideoInfo
+}
+
+func (fakeSite) Name() string { return "fake" }
+func (fakeSite) ResolveInput(context.Context, string) (string, error) {
+	return "https://fake.test/v", nil
+}
+func (f fakeSite) FetchInfo(context.Context, string) (*site.VideoInfo, error) {
+	return f.info, nil
+}
+
+func TestDownloadVideoDirectSource(t *testing.T) {
+	payload := make([]byte, 3*1024*1024)
+	for i := range payload {
+		payload[i] = byte(i % 251)
+	}
+	srv := rangeTestServer(payload)
+	defer srv.Close()
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 3
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{MaxHeight: 0},
+	}
+	info := &site.VideoInfo{
+		Code: "ep-001",
+		Sources: []site.Source{
+			{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 720},
+		},
+	}
+
+	vf, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code))
+	if err != nil {
+		t.Fatalf("downloadVideo: %v", err)
+	}
+	if vf.Codec != "h264" || vf.Size != int64(len(payload)) {
+		t.Fatalf("vf = %+v", vf)
+	}
+	if filepath.Base(vf.Path) != "ep-001-h264.mp4" {
+		t.Fatalf("path = %q", vf.Path)
+	}
+}
+
+func TestSpanWithNilTelemetry(t *testing.T) {
+	svc := &Service{}
+	ctx, end := svc.span(context.Background(), "test")
+	end()
+	if ctx == nil {
+		t.Fatal("expected non-nil ctx")
+	}
+}
+
+func TestSitesCloseIdempotent(t *testing.T) {
+	cleaned := 0
+	sites := NewSites(func(context.Context) (site.Fetcher, func(), error) {
+		return staticHTML{html: "<html></html>"}, func() { cleaned++ }, nil
+	})
+	if _, err := sites.Jable(); err != nil {
+		t.Fatalf("Jable: %v", err)
+	}
+	sites.Close()
+	sites.Close()
+	if cleaned != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleaned)
+	}
+}
+
+func TestToHLSEventMapping(t *testing.T) {
+	cases := []struct {
+		kind direct.EventKind
+		want hls.EventKind
+	}{
+		{direct.EventSegments, hls.EventSegments},
+		{direct.EventRetry, hls.EventRetry},
+		{direct.EventResume, hls.EventResume},
+	}
+	for _, tc := range cases {
+		ev := toHLSEvent(direct.Event{Kind: tc.kind, Done: 2, Total: 4, Bytes: 10, Failed: 1, Message: "m"})
+		if ev.Kind != tc.want || ev.Done != 2 || ev.Total != 4 || ev.Bytes != 10 || ev.Failed != 1 || ev.Message != "m" {
+			t.Fatalf("toHLSEvent(%v) = %+v", tc.kind, ev)
+		}
+	}
+}
+
+func TestDownloadVideoUnsupportedSourceKind(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{},
+	}
+	info := &site.VideoInfo{Code: "ep-x", Sources: []site.Source{{Kind: site.SourceKind(99), URL: "https://x", Codec: "h264"}}}
+	if _, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code)); err == nil {
+		t.Fatal("expected unsupported source kind error")
+	}
+}
+
+func TestRunMultiDownloadFailureCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	var sb stringsBuilder
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 1
+	st := fakeSite{info: &site.VideoInfo{Code: "ep-x", Sources: []site.Source{{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 720}}}}
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(&sb, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Yes: true, Force: true},
+	}
+
+	err := svc.RunMulti(context.Background(), "x", 1, st,
+		func(_ context.Context, page int) ([]site.VideoEntry, error) {
+			if page > 1 {
+				return nil, nil
+			}
+			return []site.VideoEntry{{Code: "ep-x", Title: "T", URL: "https://www.eporner.com/video-x/y/"}}, nil
+		})
+	if err == nil {
+		t.Fatal("expected PlanError for failed download")
+	}
+	if _, ok := err.(*PlanError); !ok {
+		t.Fatalf("want PlanError, got %T", err)
+	}
+}
+
+func TestRunGetHLSDownloadError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	defer srv.Close()
+
+	html := `<html><head><title>E-001 - Jable.TV</title>
+<link rel="canonical" href="https://en.jable.tv/videos/e-001/"/>
+<script>var hlsUrl = '` + srv.URL + `/media.m3u8';</script></head></html>`
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 1
+	svc := &Service{
+		Config: cfg,
+		Sites: NewSites(func(context.Context) (site.Fetcher, func(), error) {
+			return staticHTML{html: html}, func() {}, nil
+		}),
+		Out:  ui.NewStdWriter(ioDiscard{}, false),
+		Tel:  telemetry.New(telemetry.Config{}),
+		Opts: Options{Quiet: true},
+	}
+	if err := svc.RunGet(context.Background(), "e-001"); err == nil {
+		t.Fatal("expected HLS download error")
+	}
+}
+
+func TestDownloadVideoDirectQuiet(t *testing.T) {
+	payload := []byte("quiet-content")
+	srv := rangeTestServer(payload)
+	defer srv.Close()
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 2
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Quiet: true},
+	}
+	info := &site.VideoInfo{
+		Code: "ep-q",
+		Sources: []site.Source{
+			{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 240},
+		},
+	}
+
+	vf, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code))
+	if err != nil {
+		t.Fatalf("downloadVideo: %v", err)
+	}
+	if vf.Size != int64(len(payload)) {
+		t.Fatalf("size = %d, want %d", vf.Size, len(payload))
+	}
+}
+
+func TestDownloadVideoDirectTTY(t *testing.T) {
+	payload := []byte("tty-content")
+	srv := rangeTestServer(payload)
+	defer srv.Close()
+
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	cfg.WorkerCount = 2
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{TTY: true},
+	}
+	info := &site.VideoInfo{
+		Code: "ep-t",
+		Sources: []site.Source{
+			{Kind: site.SourceDirect, URL: srv.URL, Codec: "h264", Height: 240},
+		},
+	}
+
+	vf, err := svc.downloadVideo(context.Background(), fakeSite{info: info}, info, VideoDir(cfg.OutputDir, info.Code))
+	if err != nil {
+		t.Fatalf("downloadVideo: %v", err)
+	}
+	if vf.Size != int64(len(payload)) {
+		t.Fatalf("size = %d, want %d", vf.Size, len(payload))
+	}
+}
+
+func TestPickSourceMaxHeight(t *testing.T) {
+	sources := []site.Source{
+		{Kind: site.SourceDirect, Height: 240, Codec: "h264"},
+		{Kind: site.SourceDirect, Height: 480, Codec: "h264"},
+		{Kind: site.SourceDirect, Height: 720, Codec: "av1"},
+		{Kind: site.SourceDirect, Height: 720, Codec: "h264"},
+		{Kind: site.SourceDirect, Height: 1080, Codec: "h264"},
+	}
+
+	best, err := pickSource(sources, 720)
+	if err != nil || best.Height != 720 || best.Codec != "h264" {
+		t.Fatalf("max720 best = %+v err=%v", best, err)
+	}
+	best, err = pickSource(sources, 0)
+	if err != nil || best.Height != 1080 {
+		t.Fatalf("best = %+v err=%v", best, err)
+	}
+	if _, err := pickSource(sources, 480); err != nil {
+		t.Fatalf("max480 should pick 480, got err %v", err)
+	}
+	if _, err := pickSource([]site.Source{}, 0); err == nil {
+		t.Fatal("expected error for empty sources")
+	}
+}
+
+func TestSitesForAndLazyBrowser(t *testing.T) {
+	calls := 0
+	sites := NewSites(func(context.Context) (site.Fetcher, func(), error) {
+		calls++
+		return staticHTML{html: "<html></html>"}, func() {}, nil
+	})
+
+	st, err := sites.For("https://www.eporner.com/video-ABC123/slug/")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	if st.Name() != "eporner" {
+		t.Fatalf("site = %q", st.Name())
+	}
+	if calls != 0 {
+		t.Fatalf("browser must be lazy for eporner, calls=%d", calls)
+	}
+
+	j, err := sites.Jable()
+	if err != nil {
+		t.Fatalf("Jable: %v", err)
+	}
+	if j.Name() != "jable" {
+		t.Fatalf("site = %q", j.Name())
+	}
+	if calls != 1 {
+		t.Fatalf("browser calls = %d, want 1", calls)
+	}
+
+	if _, err := sites.Jable(); err != nil {
+		t.Fatalf("second Jable: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("browser must be cached, calls=%d", calls)
+	}
+
+	sites.Close()
+	if sites.httpClient() == nil {
+		t.Fatal("expected http client")
+	}
+}
+
+func TestSitesBuildJableNoFactory(t *testing.T) {
+	sites := NewSites(nil)
+	if _, err := sites.Jable(); err == nil {
+		t.Fatal("expected error when no browser factory")
+	}
+	if _, err := sites.For("not a code"); err == nil {
+		t.Fatal("expected unsupported input error")
+	}
+}
+
 type staticHTML struct{ html string }
 
-func (s staticHTML) FetchHTML(_ context.Context, _ string, _ scraper.FetchMode) (string, error) {
+func (s staticHTML) FetchHTML(_ context.Context, _ string, _ site.FetchMode) (string, error) {
 	return s.html, nil
 }
 
@@ -538,6 +881,44 @@ func generateAppTS(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// rangeTestServer serves payload with HTTP Range support (used by direct-path
+// tests). It mirrors the direct engine's expectations.
+func rangeTestServer(payload []byte) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeHdr := r.Header.Get("Range")
+		if rangeHdr == "" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload)
+			return
+		}
+		start, end, ok := parseRangeHeader(rangeHdr, len(payload))
+		if !ok {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(payload)))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload)))
+		w.Header().Set("Content-Length", strconv.Itoa(end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[start : end+1])
+	}))
+}
+
+func parseRangeHeader(h string, size int) (int, int, bool) {
+	h = strings.TrimPrefix(h, "bytes=")
+	parts := strings.SplitN(h, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	start, err1 := strconv.Atoi(parts[0])
+	end, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || start < 0 || end >= size || start > end {
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 func TestEmbedSubtitlesSoftSuccess(t *testing.T) {

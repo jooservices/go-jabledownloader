@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-09-16
+
+### Added
+
+- Multi-site support with auto-detection: the provider is resolved from the
+  input (URL host or Jable code); no `--site` flag
+- EPORNER site adapter (`internal/site/eporner`): server-rendered video pages
+  expose direct MP4 sources (240p–1080p, h264/av1); downloads need no browser
+- `internal/site` provider abstraction: `Site` interface, `VideoInfo` with a
+  source list, `Fetcher` + plain `HTTPFetcher`, and an auto-detect registry
+- `internal/direct` engine: progressive MP4 downloads with parallel Range
+  chunks, retry/backoff, cross-run resume, and shared progress events
+- `--quality` now also accepts `240`
+
+### Changed
+
+- `internal/scraper` moved to `internal/site/jable` and now implements the
+  shared `Site` contract
+- `internal/app` picks the download strategy from the source kind (HLS vs
+  direct) instead of hard-coding the HLS engine
+- The Jable browser starts lazily on first use, so EPORNER `get` never needs
+  Chrome
+
 ## [4.2.0] - 2026-09-05
 
 ### Added

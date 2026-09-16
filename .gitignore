@@ -19,3 +19,4 @@ coverage.out
 
 # Downloaded videos (output)
 /videos/
+**/videos/
