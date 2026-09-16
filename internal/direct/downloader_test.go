@@ -274,7 +274,16 @@ func TestDownloadRetriesTransientChunkError(t *testing.T) {
 }
 
 func TestDownloadFailsAfterRetries(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	payload := make([]byte, 3*1024*1024)
+	var rangeAttempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "bytes=0-0" {
+			// valid probe response so Download reaches the chunk phase
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-0/%d", len(payload)))
+			w.WriteHeader(http.StatusPartialContent)
+			return
+		}
+		rangeAttempts++
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -282,6 +291,9 @@ func TestDownloadFailsAfterRetries(t *testing.T) {
 	dl := NewDownloader(t.TempDir(), WithWorkers(1))
 	if _, err := dl.Download(context.Background(), "v", "h264", srv.URL); err == nil {
 		t.Fatal("expected error after retries")
+	}
+	if rangeAttempts < 3 {
+		t.Fatalf("expected at least 3 range attempts, got %d", rangeAttempts)
 	}
 }
 

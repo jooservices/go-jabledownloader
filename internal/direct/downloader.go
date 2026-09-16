@@ -314,8 +314,17 @@ func (d *Downloader) downloadRange(ctx context.Context, url string, start, end i
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if attempt == maxAttempts {
+				break
+			}
 			d.emit(Event{Kind: EventRetry, Message: retryHint(err)})
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			timer := time.NewTimer(time.Duration(attempt) * 500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
 			continue
 		}
 		return nil
