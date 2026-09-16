@@ -59,12 +59,17 @@ func (b *Browser) Close() {
 
 // FetchHTML navigates to url and returns the fully rendered HTML.
 // FetchHLS waits for the player hlsUrl; FetchReady returns after body is ready.
-func (b *Browser) FetchHTML(_ context.Context, url string, mode site.FetchMode) (string, error) {
-	tabCtx, tabCancel := chromedp.NewContext(b.allocCtx)
-	defer tabCancel()
+// The caller's context cancels the active tab so an interrupted command does
+// not leave Chrome polling until the timeout.
+func (b *Browser) FetchHTML(ctx context.Context, url string, mode site.FetchMode) (string, error) {
+	tabCtx, cancelTab := chromedp.NewContext(b.allocCtx)
+	defer cancelTab()
 
-	tabCtx, tabCancel = context.WithTimeout(tabCtx, 30*time.Second)
-	defer tabCancel()
+	stop := context.AfterFunc(ctx, cancelTab)
+	defer stop()
+
+	tabCtx, cancelTimeout := context.WithTimeout(tabCtx, 30*time.Second)
+	defer cancelTimeout()
 
 	actions := []chromedp.Action{
 		chromedp.Navigate(url),

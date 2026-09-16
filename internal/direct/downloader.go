@@ -146,7 +146,9 @@ func (d *Downloader) probe(ctx context.Context, url string) (int64, bool, error)
 	if err != nil {
 		return 0, false, fmt.Errorf("http get: %w — hint: check your connection", err)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// Drain only a bounded amount: if the server ignored the Range header and
+	// returned the full body, do not transfer the whole file during the probe.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 	resp.Body.Close()
 
 	if resp.StatusCode == http.StatusPartialContent {
@@ -355,8 +357,13 @@ func (d *Downloader) fetchRange(ctx context.Context, url string, start, end int6
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+	// A range request must return a 206 for the exact range we asked for.
+	if resp.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	wantRange := fmt.Sprintf("bytes %d-%d/", start, end)
+	if !strings.HasPrefix(resp.Header.Get("Content-Range"), wantRange) {
+		return fmt.Errorf("unexpected content-range %q", resp.Header.Get("Content-Range"))
 	}
 
 	tmp := outPath + ".part"
@@ -364,10 +371,16 @@ func (d *Downloader) fetchRange(ctx context.Context, url string, start, end int6
 	if err != nil {
 		return fmt.Errorf("create chunk: %w", err)
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	n, err := io.Copy(f, resp.Body)
+	if err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return fmt.Errorf("write chunk: %w", err)
+	}
+	if n != end-start+1 {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("short chunk: wrote %d of %d bytes", n, end-start+1)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)

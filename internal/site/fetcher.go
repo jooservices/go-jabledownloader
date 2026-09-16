@@ -80,6 +80,9 @@ func NewHTTPFetcher(client *http.Client) *HTTPFetcher {
 	return &HTTPFetcher{client: client}
 }
 
+// maxHTMLSize caps how much of a third-party page we read into memory.
+const maxHTMLSize = 16 << 20
+
 // FetchHTML performs a GET and returns the response body.
 func (h *HTTPFetcher) FetchHTML(ctx context.Context, url string, _ FetchMode) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -97,9 +100,12 @@ func (h *HTTPFetcher) FetchHTML(ctx context.Context, url string, _ FetchMode) (s
 		return "", fmt.Errorf("get %s: http %d", url, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTMLSize+1))
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", url, err)
+	}
+	if len(body) > maxHTMLSize {
+		return "", fmt.Errorf("read %s: response exceeds %d bytes", url, maxHTMLSize)
 	}
 	return string(body), nil
 }

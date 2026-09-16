@@ -15,7 +15,7 @@ import (
 var (
 	hlsURLRe  = regexp.MustCompile(`var\s+hlsUrl\s*=\s*'([^']+)'`)
 	videoIDRe = regexp.MustCompile(`videoId\s*[:=]\s*'(\d+)'`)
-	codeRe    = regexp.MustCompile(`(?i)[a-z]+-\d+`)
+	codeRe    = regexp.MustCompile(`(?i)^[a-z]+-\d+$`)
 )
 
 func init() {

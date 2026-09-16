@@ -21,8 +21,9 @@ import (
 const BaseURL = "https://www.eporner.com"
 
 var (
-	videoIDRe = regexp.MustCompile(`/video-([A-Za-z0-9]+)/`)
-	dloadRe   = regexp.MustCompile(`/dload/[^/]+/(\d+)/([^"]+?)-(\d+)p(-av1)?\.mp4`)
+	videoIDRe       = regexp.MustCompile(`/video-([A-Za-z0-9]+)/`)
+	fullVideoPathRe = regexp.MustCompile(`^/video-([A-Za-z0-9]+)/[^/]+/$`)
+	dloadRe         = regexp.MustCompile(`/dload/[^/]+/(\d+)/([^"]+?)-(\d+)p(-av1)?\.mp4`)
 )
 
 func init() {
@@ -54,7 +55,7 @@ func (c *Client) ResolveInput(_ context.Context, input string) (string, error) {
 	if err != nil || !site.HostMatches(u.Hostname(), "eporner.com") {
 		return "", fmt.Errorf("unsupported EPORNER URL: %s", input)
 	}
-	if videoID(u.Path) == "" {
+	if !fullVideoPathRe.MatchString(u.Path) {
 		return "", fmt.Errorf("unsupported EPORNER URL: %s (expected /video-<id>/<slug>/)", input)
 	}
 	return input, nil
