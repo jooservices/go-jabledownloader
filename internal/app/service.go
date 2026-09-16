@@ -190,17 +190,23 @@ func (s *Service) runGetGallery(ctx context.Context, st site.Site, gs site.Galle
 		s.Out.Printf("    %s%s %s%s\n", ui.ColorGreen, ui.IconOk, format.Bytes(n), ui.ColorReset)
 	}
 
-	s.Out.Printf("\n  %s%s Done: %s%d ok%s  %s%d fail%s  %s%s total%s\n",
-		ui.ColorBold, ui.IconSpark,
-		ui.ColorGreen, success, ui.ColorReset,
-		ui.ColorRed, failed, ui.ColorReset,
-		ui.ColorDim, format.Bytes(totalSize), ui.ColorReset,
-	)
+	printDoneSummary(s.Out, success, 0, failed, totalSize)
 
 	if failed > 0 {
 		return &PlanError{Failed: failed}
 	}
 	return nil
+}
+
+// printDoneSummary renders the shared batch/gallery completion line.
+func printDoneSummary(w ui.Writer, success, skipped, failed int, totalSize int64) {
+	w.Printf("\n  %s%s Done: %s%d ok%s  %s%d skip%s  %s%d fail%s  %s%s total%s\n",
+		ui.ColorBold, ui.IconSpark,
+		ui.ColorGreen, success, ui.ColorReset,
+		ui.ColorYellow, skipped, ui.ColorReset,
+		ui.ColorRed, failed, ui.ColorReset,
+		ui.ColorDim, format.Bytes(totalSize), ui.ColorReset,
+	)
 }
 
 // downloadPhoto streams one image URL into path using the shared site client.
@@ -369,13 +375,7 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, st site
 		s.Out.Printf("    %s%s %s%s\n", ui.ColorGreen, ui.IconOk, format.Bytes(result.Size), ui.ColorReset)
 	}
 
-	s.Out.Printf("\n  %s%s Done: %s%d ok%s  %s%d skip%s  %s%d fail%s  %s%s total%s\n",
-		ui.ColorBold, ui.IconSpark,
-		ui.ColorGreen, success, ui.ColorReset,
-		ui.ColorYellow, skipped, ui.ColorReset,
-		ui.ColorRed, failed, ui.ColorReset,
-		ui.ColorDim, format.Bytes(totalSize), ui.ColorReset,
-	)
+	printDoneSummary(s.Out, success, skipped, failed, totalSize)
 
 	s.Tel.Count(ctx, "run.videos", int64(success), attribute.String("outcome", "ok"))
 	s.Tel.Count(ctx, "run.videos", int64(skipped), attribute.String("outcome", "skip"))
