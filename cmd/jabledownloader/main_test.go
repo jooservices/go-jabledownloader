@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
-	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/update"
 )
 
@@ -343,7 +343,7 @@ func TestConfigCommandSetGet(t *testing.T) {
 	}
 }
 
-func TestNewScrapeServiceSuccessAndError(t *testing.T) {
+func TestNewScrapeServiceErrorSurfacesOnJable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	rootFlags.noColor = true
 	root := newRootCmd()
@@ -351,11 +351,15 @@ func TestNewScrapeServiceSuccessAndError(t *testing.T) {
 	old := newBrowser
 	defer func() { newBrowser = old }()
 
-	newBrowser = func(context.Context) (*scraper.Browser, error) {
+	newBrowser = func(context.Context) (*jable.Browser, error) {
 		return nil, fmt.Errorf("no chrome")
 	}
-	_, _, err := newScrapeService(root)
-	if err == nil {
-		t.Fatal("expected error")
+	svc, cleanup, err := newScrapeService(root)
+	if err != nil {
+		t.Fatalf("newScrapeService should not fail eagerly: %v", err)
+	}
+	defer cleanup()
+	if _, err := svc.Sites.Jable(); err == nil {
+		t.Fatal("expected error when jable requests a browser")
 	}
 }

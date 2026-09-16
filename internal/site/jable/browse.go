@@ -1,4 +1,4 @@
-package scraper
+package jable
 
 import (
 	"context"
@@ -8,30 +8,29 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+
+	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
-var (
-	videoLinkRe = regexp.MustCompile(`/videos/([^/]+)/`)
-	codeRe      = regexp.MustCompile(`(?i)[a-z]+-\d+`)
-)
+var videoLinkRe = regexp.MustCompile(`/videos/([^/]+)/`)
 
-// LatestVideos returns the latest-updates listing.
-func (c *Client) LatestVideos(ctx context.Context, page int) ([]VideoEntry, error) {
+// Latest returns the latest-updates listing.
+func (c *Client) Latest(ctx context.Context, page int) ([]site.VideoEntry, error) {
 	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/latest-updates/?page=%d", BaseURL, page))
 }
 
-// HotVideos returns the hot listing.
-func (c *Client) HotVideos(ctx context.Context, page int) ([]VideoEntry, error) {
+// Hot returns the hot listing.
+func (c *Client) Hot(ctx context.Context, page int) ([]site.VideoEntry, error) {
 	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/hot/?page=%d", BaseURL, page))
 }
 
-// SearchVideos returns search results for query.
-func (c *Client) SearchVideos(ctx context.Context, query string, page int) ([]VideoEntry, error) {
+// Search returns search results for query.
+func (c *Client) Search(ctx context.Context, query string, page int) ([]site.VideoEntry, error) {
 	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/search/%s/?page=%d", BaseURL, url.PathEscape(query), page))
 }
 
-func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]VideoEntry, error) {
-	htmlContent, err := c.fetcher.FetchHTML(ctx, pageURL, FetchReady)
+func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]site.VideoEntry, error) {
+	htmlContent, err := c.fetcher.FetchHTML(ctx, pageURL, site.FetchReady)
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +43,8 @@ func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]VideoEn
 }
 
 // extractVideosFromDoc pulls video entries out of a listing page.
-func extractVideosFromDoc(doc *goquery.Document) []VideoEntry {
-	var entries []VideoEntry
+func extractVideosFromDoc(doc *goquery.Document) []site.VideoEntry {
+	var entries []site.VideoEntry
 	seen := make(map[string]bool)
 
 	doc.Find(".video-img-box").Each(func(_ int, s *goquery.Selection) {
@@ -65,7 +64,7 @@ func extractVideosFromDoc(doc *goquery.Document) []VideoEntry {
 		}
 		seen[code] = true
 
-		entry := VideoEntry{
+		entry := site.VideoEntry{
 			Code: code,
 			URL:  BaseURL + "/videos/" + code + "/",
 		}

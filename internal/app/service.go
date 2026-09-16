@@ -13,9 +13,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jooservices/go-jabledownloader/internal/config"
+	"github.com/jooservices/go-jabledownloader/internal/direct"
 	"github.com/jooservices/go-jabledownloader/internal/format"
 	"github.com/jooservices/go-jabledownloader/internal/hls"
-	"github.com/jooservices/go-jabledownloader/internal/scraper"
+	"github.com/jooservices/go-jabledownloader/internal/site"
 	"github.com/jooservices/go-jabledownloader/internal/subtitle"
 	"github.com/jooservices/go-jabledownloader/internal/telemetry"
 	"github.com/jooservices/go-jabledownloader/internal/ui"
@@ -44,7 +45,7 @@ type Options struct {
 // Service runs the download use-cases.
 type Service struct {
 	Config *config.Config
-	Client *scraper.Client
+	Sites  *Sites
 	Out    ui.Writer
 	Tel    *telemetry.T
 	Opts   Options
@@ -59,23 +60,17 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 		ui.StartBanner(s.Out)
 	}
 
-	videoURL, err := scraper.ResolveInput(input)
+	st, err := s.Sites.For(input)
 	if err != nil {
 		return err
 	}
 
-	if code := scraper.CodeFromURL(videoURL); code != "" && !s.Opts.Force {
-		videoDir := VideoDir(s.Config.OutputDir, code)
-		if existing := FindCompleteVideo(videoDir, code); existing != "" {
-			s.Out.Printf("  %s%s Already downloaded (%s)%s\n", ui.ColorYellow, ui.IconSkip, filepath.Base(existing), ui.ColorReset)
-			if s.Opts.Subtitle {
-				return s.embedSubtitles(ctx, existing)
-			}
-			return nil
-		}
+	videoURL, err := st.ResolveInput(ctx, input)
+	if err != nil {
+		return err
 	}
 
-	info, err := s.fetchInfo(ctx, videoURL)
+	info, err := s.fetchInfo(ctx, st, videoURL)
 	if err != nil {
 		return err
 	}
@@ -84,6 +79,7 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	if !s.Opts.Quiet {
 		s.Out.Printf("  %sTitle:%s   %s\n", ui.ColorDim, ui.ColorReset, info.Title)
 		s.Out.Printf("  %sCode:%s    %s\n", ui.ColorDim, ui.ColorReset, info.Code)
+		s.Out.Printf("  %sSite:%s    %s\n", ui.ColorDim, ui.ColorReset, st.Name())
 		s.Out.Printf("  %sOutput:%s  %s\n", ui.ColorDim, ui.ColorReset, s.Config.OutputDir)
 		s.Out.Printf("  %sWorkers:%s %d\n", ui.ColorDim, ui.ColorReset, s.Config.WorkerCount)
 		if s.Opts.Verbose {
@@ -107,7 +103,7 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 		}
 	}
 
-	result, err := s.downloadVideo(ctx, info, videoDir)
+	result, err := s.downloadVideo(ctx, st, info, videoDir)
 	if err != nil {
 		return err
 	}
@@ -124,10 +120,10 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 }
 
 // VideoFetcher is one page of listing results.
-type VideoFetcher func(ctx context.Context, page int) ([]scraper.VideoEntry, error)
+type VideoFetcher func(ctx context.Context, page int) ([]site.VideoEntry, error)
 
 // RunMulti downloads a batch of videos from a listing source.
-func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher VideoFetcher) error {
+func (s *Service) RunMulti(ctx context.Context, label string, count int, st site.Site, fetcher VideoFetcher) error {
 	ctx, span := s.span(ctx, "run.multi", attribute.String("source", label))
 	defer span()
 
@@ -145,7 +141,7 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 	s.Out.Printf("  %sWorkers:%s %d\n", ui.ColorDim, ui.ColorReset, s.Config.WorkerCount)
 	s.Out.Println()
 
-	var allVideos []scraper.VideoEntry
+	var allVideos []site.VideoEntry
 	page := 1
 	for len(allVideos) < count {
 		s.Out.Printf("\r\033[K  %sScanning page %d...%s", ui.ColorDim, page, ui.ColorReset)
@@ -218,14 +214,14 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 			}
 		}
 
-		info, err := s.fetchInfo(ctx, entry.URL)
+		info, err := s.fetchInfo(ctx, st, entry.URL)
 		if err != nil {
 			s.Out.Printf("    %s%s Fetch info: %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
 			failed++
 			continue
 		}
 
-		result, err := s.downloadVideo(ctx, info, videoDir)
+		result, err := s.downloadVideo(ctx, st, info, videoDir)
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -266,12 +262,12 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, fetcher
 	return nil
 }
 
-func (s *Service) fetchInfo(ctx context.Context, url string) (*scraper.VideoInfo, error) {
+func (s *Service) fetchInfo(ctx context.Context, st site.Site, url string) (*site.VideoInfo, error) {
 	ctx, span := s.span(ctx, "crawl.fetch_video_info", attribute.String("url", url))
 	defer span()
 
 	start := time.Now()
-	info, err := s.Client.FetchVideoInfo(ctx, url)
+	info, err := st.FetchInfo(ctx, url)
 	s.Tel.Record(ctx, "crawl.fetch_video_info.duration_ms", float64(time.Since(start).Milliseconds()))
 	if err != nil {
 		s.Tel.Count(ctx, "crawl.request.total", 1, attribute.String("status", "error"))
@@ -280,6 +276,7 @@ func (s *Service) fetchInfo(ctx context.Context, url string) (*scraper.VideoInfo
 	}
 	s.Tel.Count(ctx, "crawl.request.total", 1, attribute.String("status", "ok"))
 	s.Tel.Info(ctx, "video info fetched",
+		attribute.String("site", st.Name()),
 		attribute.String("code", info.Code),
 		attribute.String("title", info.Title),
 		attribute.String("video_id", info.VideoID),
@@ -287,8 +284,32 @@ func (s *Service) fetchInfo(ctx context.Context, url string) (*scraper.VideoInfo
 	return info, nil
 }
 
-func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, videoDir string) (*hls.VideoFile, error) {
+// pickSource returns the best source at or below the max height, preferring
+// h264 over av1 at equal height. Zero maxHeight keeps the highest source.
+func pickSource(sources []site.Source, maxHeight int) (site.Source, error) {
+	if len(sources) == 0 {
+		return site.Source{}, fmt.Errorf("no download sources available")
+	}
+
+	best := sources[0]
+	for _, src := range sources {
+		if maxHeight > 0 && src.Height > maxHeight {
+			continue
+		}
+		if src.Height > best.Height ||
+			(src.Height == best.Height && src.Codec == "h264" && best.Codec == "av1") {
+			best = src
+		}
+	}
+	if maxHeight > 0 && best.Height > maxHeight {
+		return site.Source{}, fmt.Errorf("no source at or below %dp", maxHeight)
+	}
+	return best, nil
+}
+
+func (s *Service) downloadVideo(ctx context.Context, st site.Site, info *site.VideoInfo, videoDir string) (*hls.VideoFile, error) {
 	ctx, span := s.span(ctx, "video.download",
+		attribute.String("site", st.Name()),
 		attribute.String("code", info.Code),
 		attribute.String("video_id", info.VideoID),
 	)
@@ -298,11 +319,55 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
+	src, err := pickSource(info.Sources, s.Opts.MaxHeight)
+	if err != nil {
+		return nil, err
+	}
+
 	progress := ui.NewProgress(0)
 	progress.SetLabel(info.Code)
 	display := newProgressDisplay(s.Out, progress, s.Opts.Quiet, s.Opts.TTY)
 	defer display.stop()
 
+	if s.Opts.Verbose {
+		s.Out.Printf("  %sSource:%s  %s\n", ui.ColorDim, ui.ColorReset, src.URL)
+	}
+
+	start := time.Now()
+	var result *hls.VideoFile
+
+	switch src.Kind {
+	case site.SourceHLS:
+		result, err = s.downloadHLS(ctx, info.Code, src.URL, videoDir, progress)
+	case site.SourceDirect:
+		result, err = s.downloadDirect(ctx, info.Code, src, videoDir, progress)
+	default:
+		err = fmt.Errorf("unsupported source kind %d", src.Kind)
+	}
+	s.Tel.Record(ctx, "video.download.duration_ms", float64(time.Since(start).Milliseconds()),
+		attribute.String("code", info.Code), attribute.String("site", st.Name()))
+
+	if err != nil {
+		s.Tel.Count(ctx, "videos", 1, attribute.String("outcome", "failed"))
+		return nil, fmt.Errorf("download: %w", err)
+	}
+
+	if progress.SegmentsUsed() && !s.Opts.Quiet {
+		s.Out.Print(progress.Summary())
+	}
+
+	s.Tel.Count(ctx, "videos", 1, attribute.String("outcome", "completed"))
+	s.Tel.Info(ctx, "video downloaded",
+		attribute.String("site", st.Name()),
+		attribute.String("code", info.Code),
+		attribute.String("path", result.Path),
+		attribute.String("codec", result.Codec),
+		attribute.Int64("bytes", result.Size),
+	)
+	return result, nil
+}
+
+func (s *Service) downloadHLS(ctx context.Context, code, hlsURL, videoDir string, progress *ui.Progress) (*hls.VideoFile, error) {
 	dl := hls.NewDownloader(videoDir,
 		hls.WithWorkers(s.Config.WorkerCount),
 		hls.WithMaxHeight(s.Opts.MaxHeight),
@@ -313,33 +378,47 @@ func (s *Service) downloadVideo(ctx context.Context, info *scraper.VideoInfo, vi
 			}
 		}),
 	)
+	return dl.Download(ctx, code, hlsURL)
+}
 
-	if s.Opts.Verbose {
-		s.Out.Printf("  %sHLS:%s     %s\n", ui.ColorDim, ui.ColorReset, info.HLSURL)
-	}
-
-	start := time.Now()
-	result, err := dl.Download(ctx, info.Code, info.HLSURL)
-	s.Tel.Record(ctx, "hls.video.duration_ms", float64(time.Since(start).Milliseconds()),
-		attribute.String("code", info.Code))
-
-	if err != nil {
-		s.Tel.Count(ctx, "hls.videos", 1, attribute.String("outcome", "failed"))
-		return nil, fmt.Errorf("download: %w", err)
-	}
-
-	if progress.SegmentsUsed() && !s.Opts.Quiet {
-		s.Out.Print(progress.Summary())
-	}
-
-	s.Tel.Count(ctx, "hls.videos", 1, attribute.String("outcome", "completed"))
-	s.Tel.Info(ctx, "video downloaded",
-		attribute.String("code", info.Code),
-		attribute.String("path", result.Path),
-		attribute.String("codec", result.Codec),
-		attribute.Int64("bytes", result.Size),
+func (s *Service) downloadDirect(ctx context.Context, code string, src site.Source, videoDir string, progress *ui.Progress) (*hls.VideoFile, error) {
+	dl := direct.NewDownloader(videoDir,
+		direct.WithWorkers(s.Config.WorkerCount),
+		direct.WithHTTPClient(s.Sites.httpClient()),
+		direct.WithProgress(func(ev direct.Event) {
+			h := toHLSEvent(ev)
+			progress.Update(h)
+			if ev.Kind == direct.EventResume && ev.Message != "" {
+				s.Out.Printf("  %s%s %s%s\n", ui.ColorYellow, ui.IconClock, ev.Message, ui.ColorReset)
+			}
+		}),
 	)
-	return result, nil
+	vf, err := dl.Download(ctx, code, src.Codec, src.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &hls.VideoFile{Path: vf.Path, Size: vf.Size, Codec: vf.Codec}, nil
+}
+
+// toHLSEvent adapts a direct engine event to the shared UI event shape.
+func toHLSEvent(ev direct.Event) hls.Event {
+	kind := hls.EventSegments
+	switch ev.Kind {
+	case direct.EventRetry:
+		kind = hls.EventRetry
+	case direct.EventResume:
+		kind = hls.EventResume
+	}
+	return hls.Event{
+		Kind:    kind,
+		Done:    ev.Done,
+		Total:   ev.Total,
+		Bytes:   ev.Bytes,
+		Failed:  ev.Failed,
+		Seconds: ev.Seconds,
+		Speed:   ev.Speed,
+		Message: ev.Message,
+	}
 }
 
 func (s *Service) embedSubtitles(ctx context.Context, videoPath string) error {
@@ -463,7 +542,7 @@ func (d *progressDisplay) stop() {
 }
 
 // pickVideos runs the interactive picker when appropriate.
-func (s *Service) pickVideos(videos []scraper.VideoEntry) ([]scraper.VideoEntry, error) {
+func (s *Service) pickVideos(videos []site.VideoEntry) ([]site.VideoEntry, error) {
 	if s.Opts.DryRun || s.Opts.Yes || s.Opts.Quiet || !interactive() {
 		return videos, nil
 	}
@@ -486,7 +565,7 @@ func (s *Service) pickVideos(videos []scraper.VideoEntry) ([]scraper.VideoEntry,
 		return nil, fmt.Errorf("video picker: %w", err)
 	}
 
-	selected := []scraper.VideoEntry{}
+	selected := []site.VideoEntry{}
 	for i, it := range picked {
 		if it.Selected && i < len(videos) {
 			selected = append(selected, videos[i])
@@ -495,7 +574,7 @@ func (s *Service) pickVideos(videos []scraper.VideoEntry) ([]scraper.VideoEntry,
 	return selected, nil
 }
 
-func (s *Service) printPlan(selected []scraper.VideoEntry) {
+func (s *Service) printPlan(selected []site.VideoEntry) {
 	var totalEst int64
 	s.Out.Printf("\n  %sVideos:%s\n", ui.ColorBold, ui.ColorReset)
 	for _, v := range selected {

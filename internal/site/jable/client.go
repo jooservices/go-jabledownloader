@@ -1,8 +1,7 @@
-// Package scraper adapts the Jable.TV site into the domain types the app
-// works with. It wraps chromedp (Cloudflare bypass) and goquery (parsing).
-// The HTML source is behind the Fetcher interface so tests can inject
-// fixture content instead of launching Chrome.
-package scraper
+// Package jable adapts Jable.TV to the site.Site contract. It wraps
+// chromedp (Cloudflare bypass) and goquery (parsing); the HTML source is
+// behind a site.Fetcher so tests inject fixture content instead of Chrome.
+package jable
 
 import (
 	"context"
@@ -12,31 +11,15 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+
+	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
 // BaseURL is the site root.
 const BaseURL = "https://en.jable.tv"
 
-// userAgent mirrors a desktop Chrome build.
-const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-// Fetcher returns the rendered HTML of a page. Browser implements it with
-// Chrome; tests implement it with fixtures.
-type Fetcher interface {
-	FetchHTML(ctx context.Context, url string, mode FetchMode) (string, error)
-}
-
-// FetchMode controls how long FetchHTML waits for page-specific signals.
-type FetchMode int
-
-const (
-	// FetchReady waits only for a ready document body (listing pages).
-	FetchReady FetchMode = iota
-	// FetchHLS waits until the player injects a non-empty hlsUrl (video pages).
-	FetchHLS
-)
-
-// Browser launches and drives a headless Chrome instance.
+// Browser implements site.Fetcher with a headless Chrome instance that
+// bypasses Cloudflare and waits for the player to inject its stream URL.
 type Browser struct {
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
@@ -76,7 +59,7 @@ func (b *Browser) Close() {
 
 // FetchHTML navigates to url and returns the fully rendered HTML.
 // FetchHLS waits for the player hlsUrl; FetchReady returns after body is ready.
-func (b *Browser) FetchHTML(_ context.Context, url string, mode FetchMode) (string, error) {
+func (b *Browser) FetchHTML(_ context.Context, url string, mode site.FetchMode) (string, error) {
 	tabCtx, tabCancel := chromedp.NewContext(b.allocCtx)
 	defer tabCancel()
 
@@ -87,7 +70,7 @@ func (b *Browser) FetchHTML(_ context.Context, url string, mode FetchMode) (stri
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body"),
 	}
-	if mode == FetchHLS {
+	if mode == site.FetchHLS {
 		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
 			for i := 0; i < 30; i++ {
 				var hasHLS bool
@@ -107,3 +90,6 @@ func (b *Browser) FetchHTML(_ context.Context, url string, mode FetchMode) (stri
 	}
 	return htmlContent, nil
 }
+
+// userAgent mirrors a desktop Chrome build.
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
