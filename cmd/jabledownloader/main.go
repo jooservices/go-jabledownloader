@@ -21,8 +21,9 @@ import (
 	"github.com/jooservices/go-jabledownloader/internal/ui"
 	"github.com/jooservices/go-jabledownloader/internal/update"
 
-	// Register the EPORNER site (init-time registration).
+	// Register the EPORNER and Jav Photos sites (init-time registration).
 	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
+	_ "github.com/jooservices/go-jabledownloader/internal/site/javphotos"
 )
 
 // version is stamped at build time via

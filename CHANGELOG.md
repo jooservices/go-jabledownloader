@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Jav Photos photo-gallery support: `get` on a `/free/<slug>` URL downloads
+  every photo at its largest available resolution (`internal/site/javphotos` +
+  a `GallerySite` contract in `internal/site`)
+
 ## [4.3.0] - 2026-09-16
 
 ### Added

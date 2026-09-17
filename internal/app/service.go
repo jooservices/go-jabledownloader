@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,13 +59,17 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	ctx, span := s.span(ctx, "run.get", attribute.String("input", input))
 	defer span()
 
-	if !s.Opts.Quiet {
-		ui.StartBanner(s.Out)
-	}
-
 	st, err := s.Sites.For(input)
 	if err != nil {
 		return err
+	}
+
+	if gs, ok := st.(site.GallerySite); ok {
+		return s.runGetGallery(ctx, st, gs, input)
+	}
+
+	if !s.Opts.Quiet {
+		ui.StartBanner(s.Out)
 	}
 
 	videoURL, err := st.ResolveInput(ctx, input)
@@ -121,6 +128,135 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 
 // VideoFetcher is one page of listing results.
 type VideoFetcher func(ctx context.Context, page int) ([]site.VideoEntry, error)
+
+// runGetGallery downloads every photo of a gallery at its largest size.
+func (s *Service) runGetGallery(ctx context.Context, st site.Site, gs site.GallerySite, input string) error {
+	ctx, span := s.span(ctx, "run.get_gallery", attribute.String("input", input))
+	defer span()
+
+	if !s.Opts.Quiet {
+		ui.StartBanner(s.Out)
+	}
+
+	galleryURL, err := st.ResolveInput(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	gallery, err := gs.FetchGallery(ctx, galleryURL)
+	if err != nil {
+		return fmt.Errorf("fetch gallery: %w", err)
+	}
+
+	outDir := filepath.Join(s.Config.OutputDir, gallery.Code)
+	if !s.Opts.Quiet {
+		s.Out.Printf("  %sTitle:%s   %s\n", ui.ColorDim, ui.ColorReset, gallery.Title)
+		s.Out.Printf("  %sGallery:%s %s\n", ui.ColorDim, ui.ColorReset, gallery.Code)
+		s.Out.Printf("  %sPhotos:%s  %d\n", ui.ColorDim, ui.ColorReset, len(gallery.Photos))
+		s.Out.Printf("  %sOutput:%s  %s\n", ui.ColorDim, ui.ColorReset, outDir)
+		s.Out.Println()
+	}
+
+	if s.Opts.DryRun {
+		s.Out.Printf("  %s%s Dry run — nothing downloaded.%s\n", ui.ColorYellow, ui.IconSpark, ui.ColorReset)
+		return nil
+	}
+
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	var totalSize int64
+	success, failed := 0, 0
+	for i, photo := range gallery.Photos {
+		if photo.ImageURL == "" {
+			failed++
+			continue
+		}
+		name := fmt.Sprintf("%03d-%s%s", i+1, photo.ID, extOf(photo.ImageURL))
+		s.Out.Printf("  %s[%d/%d]%s %s\n", ui.ColorCyan, i+1, len(gallery.Photos), ui.ColorReset, name)
+
+		n, err := s.downloadPhoto(ctx, photo.ImageURL, filepath.Join(outDir, name))
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.Out.Printf("    %s%s %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
+			failed++
+			continue
+		}
+		totalSize += n
+		success++
+		s.Out.Printf("    %s%s %s%s\n", ui.ColorGreen, ui.IconOk, format.Bytes(n), ui.ColorReset)
+	}
+
+	printDoneSummary(s.Out, success, 0, failed, totalSize)
+
+	if failed > 0 {
+		return &PlanError{Failed: failed}
+	}
+	return nil
+}
+
+// printDoneSummary renders the shared batch/gallery completion line.
+func printDoneSummary(w ui.Writer, success, skipped, failed int, totalSize int64) {
+	w.Printf("\n  %s%s Done: %s%d ok%s  %s%d skip%s  %s%d fail%s  %s%s total%s\n",
+		ui.ColorBold, ui.IconSpark,
+		ui.ColorGreen, success, ui.ColorReset,
+		ui.ColorYellow, skipped, ui.ColorReset,
+		ui.ColorRed, failed, ui.ColorReset,
+		ui.ColorDim, format.Bytes(totalSize), ui.ColorReset,
+	)
+}
+
+// downloadPhoto streams one image URL into path using the shared site client.
+func (s *Service) downloadPhoto(ctx context.Context, imageURL, path string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+	// Reference the image's own origin so site hotlink protection is satisfied
+	// instead of inheriting another site's referer from the shared client.
+	if u, uerr := url.Parse(imageURL); uerr == nil && u.Host != "" {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	}
+	resp, err := s.Sites.httpClient().Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("get %s: %w", imageURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return 0, fmt.Errorf("get %s: http %d", imageURL, resp.StatusCode)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return 0, fmt.Errorf("create file: %w", err)
+	}
+	n, copyErr := io.Copy(f, resp.Body)
+	closeErr := f.Close()
+	if copyErr != nil {
+		os.Remove(path)
+		return 0, fmt.Errorf("write %s: %w", path, copyErr)
+	}
+	if closeErr != nil {
+		os.Remove(path)
+		return 0, fmt.Errorf("close %s: %w", path, closeErr)
+	}
+	return n, nil
+}
+
+// extOf returns the file extension of a URL path, defaulting to ".jpg".
+func extOf(u string) string {
+	path := u
+	if parsed, err := url.Parse(u); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
+	if i := strings.LastIndex(path, "."); i >= 0 && i < len(path)-1 {
+		return path[i:]
+	}
+	return ".jpg"
+}
 
 // RunMulti downloads a batch of videos from a listing source.
 func (s *Service) RunMulti(ctx context.Context, label string, count int, st site.Site, fetcher VideoFetcher) error {
@@ -244,13 +380,7 @@ func (s *Service) RunMulti(ctx context.Context, label string, count int, st site
 		s.Out.Printf("    %s%s %s%s\n", ui.ColorGreen, ui.IconOk, format.Bytes(result.Size), ui.ColorReset)
 	}
 
-	s.Out.Printf("\n  %s%s Done: %s%d ok%s  %s%d skip%s  %s%d fail%s  %s%s total%s\n",
-		ui.ColorBold, ui.IconSpark,
-		ui.ColorGreen, success, ui.ColorReset,
-		ui.ColorYellow, skipped, ui.ColorReset,
-		ui.ColorRed, failed, ui.ColorReset,
-		ui.ColorDim, format.Bytes(totalSize), ui.ColorReset,
-	)
+	printDoneSummary(s.Out, success, skipped, failed, totalSize)
 
 	s.Tel.Count(ctx, "run.videos", int64(success), attribute.String("outcome", "ok"))
 	s.Tel.Count(ctx, "run.videos", int64(skipped), attribute.String("outcome", "skip"))

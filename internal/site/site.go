@@ -62,5 +62,25 @@ type Lister interface {
 	Search(ctx context.Context, query string, page int) ([]VideoEntry, error)
 }
 
+// Photo is one full-resolution image in a photo gallery.
+type Photo struct {
+	ID           string
+	ImageURL     string // largest available resolution
+	ThumbnailURL string
+}
+
+// Gallery is a photo gallery with its full photo set.
+type Gallery struct {
+	Code   string
+	Title  string
+	Photos []Photo
+}
+
+// GallerySite is the optional contract a photo-gallery provider implements
+// (e.g. Jav Photos). It complements Site rather than replacing it.
+type GallerySite interface {
+	FetchGallery(ctx context.Context, url string) (*Gallery, error)
+}
+
 // ErrUnsupportedInput is returned when no registered site can resolve input.
 var ErrUnsupportedInput = errors.New("unsupported input: provide a site URL or a recognized video code")

@@ -8,13 +8,14 @@
 [![GitHub Release](https://img.shields.io/github/v/release/jooservices/go-jabledownloader?display_name=tag)](https://github.com/jooservices/go-jabledownloader/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A single-binary Go CLI for downloading videos from multiple sites (Jable.TV,
-EPORNER, ...). The site is auto-detected from the input — no `--site` flag.
-Jable uses a Cloudflare-bypassing Chrome fetch and parallel HLS segment
-downloads; EPORNER is server-rendered, so it downloads direct MP4 files over
-plain HTTP with parallel Range chunks. Also includes an interactive picker,
-self-update, and optional OpenTelemetry export to the JOOservices OpenObserve
-platform.
+A single-binary Go CLI for downloading videos and photo galleries from
+multiple sites (Jable.TV, EPORNER, Jav Photos, ...). The site is auto-detected
+from the input — no `--site` flag. Jable uses a Cloudflare-bypassing Chrome
+fetch and parallel HLS segment downloads; EPORNER is server-rendered, so it
+downloads direct MP4 files over plain HTTP with parallel Range chunks. Jav
+Photos downloads every gallery photo at its largest available resolution.
+Also includes an interactive picker, self-update, and optional OpenTelemetry
+export to the JOOservices OpenObserve platform.
 
 > [!WARNING]
 > **`v4.0.0` is a complete rebuild of the previous `jabledownloader` CLI (up to v3.x) and is NOT backward compatible.**
@@ -34,6 +35,8 @@ platform.
 
 - Multi-site with auto-detection: `get` resolves the provider from the URL
   (or Jable code); no `--site` flag
+- Photo galleries: `get` on a Jav Photos gallery URL downloads every photo at
+  its largest resolution (`/free/<slug>` → full-res `/pictures/` set)
 - EPORNER: direct MP4 download (240p–1080p, h264/av1) over parallel Range
   chunks with resume; no browser required
 - `get` a single video by URL or code (e.g. `jur-827`); skips existing files unless `--force`
@@ -92,6 +95,7 @@ jabledownloader get jur-827
 jabledownloader get https://en.jable.tv/videos/abf-382/ --subtitle
 jabledownloader get abf-382 --subtitle --subtitle-mode hard
 jabledownloader get https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/ --quality 720
+jabledownloader get https://jav.photos/free/caribbeancom-ai-uehara-elite-3xpl
 jabledownloader search cute --dry-run
 jabledownloader latest --count 5
 ```
@@ -147,11 +151,11 @@ Project rules live in [AGENTS.md](AGENTS.md). Key user-facing invariants:
 - Output naming: `<code>-<codec>.mp4` (codec from master playlist or the MP4
   source, h264 fallback); `--subtitle` also writes `<code>-<codec>.en.srt`
 - Layered `internal/` packages: `internal/site` (provider abstraction +
-  auto-detect registry, `site/jable`, `site/eporner`), `internal/hls` and
-  `internal/direct` are pure engines (no UI/config/telemetry dependencies);
-  engine and site tests use fixture data and never launch Chrome
+  auto-detect registry, `site/jable`, `site/eporner`, `site/javphotos`),
+  `internal/hls` and `internal/direct` are pure engines (no UI/config/telemetry
+  dependencies); engine and site tests use fixture data and never launch Chrome
 - The site is auto-detected from the input; Jable additionally needs a
-  browser, EPORNER does not
+  browser, EPORNER and Jav Photos do not
 
 ## Documentation
 
