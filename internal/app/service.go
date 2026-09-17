@@ -59,10 +59,6 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 	ctx, span := s.span(ctx, "run.get", attribute.String("input", input))
 	defer span()
 
-	if !s.Opts.Quiet {
-		ui.StartBanner(s.Out)
-	}
-
 	st, err := s.Sites.For(input)
 	if err != nil {
 		return err
@@ -70,6 +66,10 @@ func (s *Service) RunGet(ctx context.Context, input string) error {
 
 	if gs, ok := st.(site.GallerySite); ok {
 		return s.runGetGallery(ctx, st, gs, input)
+	}
+
+	if !s.Opts.Quiet {
+		ui.StartBanner(s.Out)
 	}
 
 	videoURL, err := st.ResolveInput(ctx, input)
@@ -179,7 +179,7 @@ func (s *Service) runGetGallery(ctx context.Context, st site.Site, gs site.Galle
 		n, err := s.downloadPhoto(ctx, photo.ImageURL, filepath.Join(outDir, name))
 		if err != nil {
 			if ctx.Err() != nil {
-				break
+				return ctx.Err()
 			}
 			s.Out.Printf("    %s%s %v%s\n", ui.ColorRed, ui.IconErr, err, ui.ColorReset)
 			failed++
@@ -214,6 +214,11 @@ func (s *Service) downloadPhoto(ctx context.Context, imageURL, path string) (int
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
+	}
+	// Reference the image's own origin so site hotlink protection is satisfied
+	// instead of inheriting another site's referer from the shared client.
+	if u, uerr := url.Parse(imageURL); uerr == nil && u.Host != "" {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
 	}
 	resp, err := s.Sites.httpClient().Do(req)
 	if err != nil {

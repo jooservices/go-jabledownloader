@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1183,3 +1184,54 @@ func (s *stringsBuilder) Write(p []byte) (int, error) {
 }
 
 func (s *stringsBuilder) String() string { return string(s.b) }
+
+func TestDownloadPhotoSetsReferer(t *testing.T) {
+	var gotRef string
+	payload := []byte("img")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRef = r.Header.Get("Referer")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	svc := &Service{Sites: NewSites(nil)}
+	n, err := svc.downloadPhoto(context.Background(), srv.URL+"/a.jpg", filepath.Join(t.TempDir(), "a.jpg"))
+	if err != nil || n != int64(len(payload)) {
+		t.Fatalf("downloadPhoto = %d, %v", n, err)
+	}
+	if want := srv.URL + "/"; gotRef != want {
+		t.Fatalf("referer = %q, want %q", gotRef, want)
+	}
+}
+
+func TestRunGetGalleryCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	gs := fakeGallerySite{gallery: &site.Gallery{
+		Code:  "gx",
+		Title: "GX",
+		Photos: []site.Photo{
+			{ID: "p1", ImageURL: srv.URL + "/p1.jpg"},
+		},
+	}}
+	cfg := config.Defaults()
+	cfg.OutputDir = t.TempDir()
+	svc := &Service{
+		Config: cfg,
+		Sites:  NewSites(nil),
+		Out:    ui.NewStdWriter(ioDiscard{}, false),
+		Tel:    telemetry.New(telemetry.Config{}),
+		Opts:   Options{Quiet: true},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := svc.runGetGallery(ctx, gs, gs, "https://jav.photos/free/gx")
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
