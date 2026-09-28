@@ -8,3 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 RUN GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+ENV XDG_CONFIG_HOME=/tmp/.chromium
+ENV XDG_CACHE_HOME=/tmp/.chromium
