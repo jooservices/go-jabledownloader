@@ -78,3 +78,10 @@ func (uppercaseTranslator) Translate(ctx context.Context, cues []domain.Cue, fro
 	}
 	return result, nil
 }
+
+func TestNoneTranslatorName(t *testing.T) {
+	tr, err := translate.Default.New("none", translate.Config{})
+	if err != nil || tr.Name() != "none" {
+		t.Fatalf("tr=%v err=%v", tr, err)
+	}
+}

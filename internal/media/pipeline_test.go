@@ -232,3 +232,26 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestRunReportsUnwritableSidecarLocation(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permissions")
+	}
+	s := newSetup(t, Options{})
+	dir := filepath.Dir(s.video)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	if _, _, err := s.pipeline.Run(context.Background(), s.video); err == nil || !strings.Contains(err.Error(), "create subtitle file") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWriteSRTRejectsInvalidCues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.srt")
+	if err := writeSRT(path, []domain.Cue{{Start: -time.Second, Text: "bad"}}); err == nil {
+		t.Fatal("expected negative timestamp error")
+	}
+}

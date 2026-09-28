@@ -596,3 +596,23 @@ func TestSitesBuildsBrowserLazilyOnce(t *testing.T) {
 		t.Fatal("expected unknown site error")
 	}
 }
+
+// Every event type must satisfy the sealed Event interface.
+func TestEventTypesImplementEvent(_ *testing.T) {
+	for _, ev := range []Event{
+		RunStarted{}, VideoResolved{}, DryRun{}, VideoSkipped{}, DownloadStarted{}, DownloadProgress{},
+		DownloadStopped{}, VideoDownloaded{}, SubtitleStarted{}, SubtitleDone{}, DiscoveryStarted{},
+		DiscoveryDone{}, PlanReady{}, Cancelled{}, ItemFailed{},
+	} {
+		ev.appEvent()
+	}
+}
+
+func TestListUsesView(t *testing.T) {
+	f := newFixture(t)
+	f.world.items["alpha"] = []domain.Item{{Code: "a-1"}}
+	result, err := f.svc.List(context.Background(), "alpha", "hot", 2, 0)
+	if err != nil || len(result.Items) != 1 || result.Items[0].Site != "alpha" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

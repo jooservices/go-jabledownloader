@@ -351,3 +351,44 @@ func TestTotalFromContentRange(t *testing.T) {
 		}
 	}
 }
+
+func TestConcatChunksErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := concatChunks(context.Background(), dir, 1, filepath.Join(dir, "out")); err == nil {
+		t.Fatal("expected missing chunk error")
+	}
+	if err := os.WriteFile(chunkPath(dir, 0), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := concatChunks(ctx, dir, 1, filepath.Join(dir, "out")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled err = %v", err)
+	}
+	if err := concatChunks(context.Background(), dir, 1, filepath.Join(dir, "missing-dir", "out")); err == nil {
+		t.Fatal("expected create error")
+	}
+}
+
+// A stream that breaks mid-body fails instead of producing a short file.
+func TestDownloadStreamReportsBrokenBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			_, _ = w.Write([]byte("x"))
+			return
+		}
+		w.Header().Set("Content-Length", "1000")
+		_, _ = w.Write([]byte("partial"))
+	}))
+	defer ts.Close()
+	dir := t.TempDir()
+
+	_, err := testDownloader(ts.Client(), 4).Download(context.Background(), request(ts.URL, dir, 1), nil)
+
+	if err == nil || !strings.Contains(err.Error(), "read body") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(engine.PartialPath(dir)); !os.IsNotExist(statErr) {
+		t.Fatal("partial file left behind")
+	}
+}

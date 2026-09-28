@@ -485,3 +485,77 @@ func TestPlaylistBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchSegmentRejectsEmptyAndOversizedBodies(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/big.ts" {
+			_, _ = w.Write(make([]byte, maxSegmentBytes+1))
+		}
+	}))
+	defer srv.Close()
+	e := testEngine(srv.Client())
+	dir := t.TempDir()
+	for path, want := range map[string]string{"/empty.ts": "empty segment", "/big.ts": "segment exceeds"} {
+		out := filepath.Join(dir, strings.TrimPrefix(path, "/"))
+		if _, err := e.fetchSegment(context.Background(), srv.URL+path, nil, out); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v", path, err)
+		}
+		if _, err := os.Stat(out + ".tmp"); !os.IsNotExist(err) {
+			t.Errorf("%s: temporary file left behind", path)
+		}
+	}
+}
+
+func TestFFmpegMissingIsReported(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if err := remux(context.Background(), "https://cdn.test/v.m3u8", nil, filepath.Join(t.TempDir(), "o.mp4"), nil); err == nil || !strings.Contains(err.Error(), "ffmpeg is required") {
+		t.Fatalf("remux err = %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(segmentPath(dir, 0), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := concat(context.Background(), dir, 1, filepath.Join(dir, "o.mp4")); err == nil || !strings.Contains(err.Error(), "ffmpeg is required") {
+		t.Fatalf("concat err = %v", err)
+	}
+	if _, err := remuxArgs("u", http.Header{"X": {"a\nb"}}, "o"); err == nil {
+		t.Fatal("expected header error")
+	}
+}
+
+// Invalid media makes ffmpeg fail: the concat error is reported, and remux
+// surfaces ffmpeg's own message.
+func TestFFmpegFailuresSurfaceOutput(t *testing.T) {
+	requireFFmpegForTest(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(segmentPath(dir, 0), []byte("not a transport stream"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := concat(context.Background(), dir, 1, filepath.Join(dir, "o.mp4")); err == nil || !strings.Contains(err.Error(), "ffmpeg concat") {
+		t.Fatalf("concat err = %v", err)
+	}
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	if err := remux(context.Background(), srv.URL+"/missing.m3u8", nil, filepath.Join(dir, "r.mp4"), nil); err == nil || !strings.Contains(err.Error(), "ffmpeg:") {
+		t.Fatalf("remux err = %v", err)
+	}
+}
+
+// Segments that ffmpeg cannot concatenate fall back to a remux, announced
+// with a retry event.
+func TestConcatFailureFallsBackToRemux(t *testing.T) {
+	requireFFmpegForTest(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/media.m3u8", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, mediaPlaylist(1)) })
+	mux.HandleFunc("/seg0.ts", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("garbage")) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rec := &recorder{}
+
+	_, err := testEngine(srv.Client()).Download(context.Background(), request(srv.URL+"/media.m3u8", t.TempDir()), rec.sink)
+
+	retry, _ := rec.last(domain.EventRetry)
+	if err == nil || !strings.Contains(retry.Message, "remuxing with ffmpeg") {
+		t.Fatalf("err=%v retry=%+v", err, retry)
+	}
+}

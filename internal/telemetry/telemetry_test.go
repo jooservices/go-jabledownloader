@@ -74,3 +74,9 @@ func TestUnreachableEndpointStaysFailOpen(t *testing.T) {
 	end()
 	tel.Shutdown(ctx)
 }
+
+func TestVersionOr(t *testing.T) {
+	if versionOr("") != "dev" || versionOr("v1.2.3") != "v1.2.3" {
+		t.Fatal("versionOr")
+	}
+}

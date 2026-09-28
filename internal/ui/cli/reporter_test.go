@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -202,5 +204,45 @@ func TestStdWriterStripsColorArguments(t *testing.T) {
 	NewStdWriter(&out, false).Printf("%sred%s\n", ColorRed, ColorReset)
 	if out.String() != "red\n" {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestColorEnabledHonoursEnvironment(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	for _, tc := range []struct {
+		env  map[string]string
+		want bool
+	}{
+		{map[string]string{"NO_COLOR": "1"}, false},
+		{map[string]string{"TERM": "dumb"}, false},
+		{map[string]string{"FORCE_COLOR": "true"}, true},
+		{map[string]string{"FORCE_COLOR": "0"}, false},
+		{map[string]string{}, false}, // a regular file is not a terminal
+	} {
+		t.Run(fmt.Sprint(tc.env), func(t *testing.T) {
+			for _, key := range []string{"NO_COLOR", "TERM", "FORCE_COLOR"} {
+				if value, ok := tc.env[key]; ok {
+					t.Setenv(key, value)
+				} else {
+					t.Setenv(key, "xterm")
+					if key != "TERM" {
+						os.Unsetenv(key)
+					}
+				}
+			}
+			if got := ColorEnabled(file); got != tc.want {
+				t.Fatalf("ColorEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPickerLabelWithoutTitle(t *testing.T) {
+	if got := pickerLabel(domain.Item{Code: "abc-1"}); got != "abc-1" {
+		t.Fatal(got)
 	}
 }

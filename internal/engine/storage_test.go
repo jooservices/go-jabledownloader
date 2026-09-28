@@ -88,3 +88,43 @@ func TestWorkDiscardRemovesSegments(t *testing.T) {
 		t.Fatalf("segments dir still present: %v", err)
 	}
 }
+
+func TestWorkErrorsOnUnwritableDirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permissions")
+	}
+	dir := t.TempDir()
+	w, err := WorkDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	if _, err := w.Open("fp"); err == nil {
+		t.Fatal("expected error creating segments in a read-only dir")
+	}
+	if err := Finalize(filepath.Join(dir, "missing.part"), filepath.Join(dir, "sub", "final.mp4")); err == nil {
+		t.Fatal("expected error finalizing into a read-only dir")
+	}
+	if err := Finalize(filepath.Join(t.TempDir(), "missing.part"), filepath.Join(t.TempDir(), "final.mp4")); err == nil {
+		t.Fatal("expected error for a missing partial file")
+	}
+	if _, err := WorkDir(filepath.Join(dir, "child")); err == nil {
+		t.Fatal("expected error creating a work dir under a read-only dir")
+	}
+}
+
+func TestWorkOpenRejectsEmptyFingerprint(t *testing.T) {
+	w, err := WorkDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	if _, err := w.Open(" "); err == nil {
+		t.Fatal("expected fingerprint error")
+	}
+}

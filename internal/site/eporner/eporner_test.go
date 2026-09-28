@@ -189,3 +189,21 @@ func TestListAndSearchErrors(t *testing.T) {
 		t.Fatal("expected blank keyword error")
 	}
 }
+
+func TestURLAndTextHelpers(t *testing.T) {
+	if got := absoluteURL("https://cdn.test/x"); got != "https://cdn.test/x" {
+		t.Fatal(got)
+	}
+	if got := absoluteURL("/video-a/b/"); got != BaseURL+"/video-a/b/" {
+		t.Fatal(got)
+	}
+	if got := firstNonEmpty(" ", "\t", " x "); got != "x" {
+		t.Fatal(got)
+	}
+	if got := firstNonEmpty("", " "); got != "" {
+		t.Fatal(got)
+	}
+	if got := pageURL("/", 1); got != BaseURL+"/" {
+		t.Fatal(got)
+	}
+}

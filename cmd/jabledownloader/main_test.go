@@ -417,3 +417,38 @@ func TestParseQualityAndEnvOr(t *testing.T) {
 		t.Fatal("envOr")
 	}
 }
+
+type noopRunner struct{}
+
+func (noopRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+func (noopRunner) LookPath(file string) (string, error)                   { return "/usr/bin/" + file, nil }
+
+func TestNewSubtitlerBuildsValidatedPipeline(t *testing.T) {
+	o := &options{subtitle: true, subtitleMode: "hard", subtitleLang: "", translator: "auto", verbose: true, spokenLanguage: "ja"}
+	sub, err := newSubtitler(o, noopRunner{}, &bytes.Buffer{})
+	if err != nil || sub == nil {
+		t.Fatalf("sub=%v err=%v", sub, err)
+	}
+	if sub, err := newSubtitler(&options{subtitleMode: "soft"}, noopRunner{}, nil); err != nil || sub != nil {
+		t.Fatalf("without --subtitle: sub=%v err=%v", sub, err)
+	}
+	if _, err := newSubtitler(&options{subtitle: true}, nil, nil); err == nil {
+		t.Fatal("expected missing runner error")
+	}
+}
+
+func TestProductionDeps(t *testing.T) {
+	d := productionDeps()
+	if d.stdin == nil || d.stdout == nil || d.stderr == nil || d.browser == nil || d.latestRelease == nil || d.install == nil || d.runner == nil {
+		t.Fatalf("incomplete deps: %+v", d)
+	}
+}
+
+func TestLaunchBrowserReportsMissingChrome(t *testing.T) {
+	t.Setenv("CHROME_PATH", filepath.Join(t.TempDir(), "no-chrome"))
+	t.Setenv("CHROME_NO_SANDBOX", "0")
+	_, _, err := launchBrowser(&bytes.Buffer{})(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Chrome/Chromium is required") {
+		t.Fatalf("err = %v", err)
+	}
+}
