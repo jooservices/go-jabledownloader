@@ -80,6 +80,7 @@ func allocatorOptions(noSandbox bool, chromePath, profileDir string) []chromedp.
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", "new"),
 		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("disable-crash-reporter", true),
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
