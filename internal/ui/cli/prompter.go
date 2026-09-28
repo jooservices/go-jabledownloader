@@ -31,14 +31,15 @@ func NewPrompter(in io.Reader, out *StdWriter, interactive bool) *Prompter {
 	return &Prompter{in: bufio.NewReader(in), out: out, interactive: interactive}
 }
 
-// Pick shows the multi-select picker, all items preselected.
+// Pick shows the multi-select picker with nothing preselected; the user
+// opts in to each download (a selects all).
 func (p *Prompter) Pick(items []domain.Item) ([]domain.Item, error) {
 	if !p.interactive || len(items) == 0 {
 		return items, nil
 	}
 	choices := make([]PickerItem, len(items))
 	for i, item := range items {
-		choices[i] = PickerItem{ID: item.Code, Label: pickerLabel(item), Detail: pickerDetail(item), Selected: true}
+		choices[i] = PickerItem{ID: item.Code, Label: pickerLabel(item), Detail: pickerDetail(item)}
 	}
 	picked, err := pickMulti("Select videos to download", choices)
 	if errors.Is(err, ErrPickerCancelled) {

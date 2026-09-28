@@ -461,6 +461,15 @@ func TestRunItems(t *testing.T) {
 			t.Fatal("expected cancellation without downloads")
 		}
 	})
+	t.Run("nothing picked", func(t *testing.T) {
+		f := setup(t, Options{}, &fakePrompter{pick: []domain.Item{}})
+		if err := f.svc.RunItems(context.Background(), items); err != nil || len(f.engine.requests()) != 0 {
+			t.Fatalf("err=%v downloads=%d", err, len(f.engine.requests()))
+		}
+		if _, ok := find[Cancelled](f.rec); !ok {
+			t.Fatal("expected Cancelled event")
+		}
+	})
 	t.Run("confirm declined", func(t *testing.T) {
 		f := setup(t, Options{}, &fakePrompter{confirm: false})
 		if err := f.svc.RunItems(context.Background(), items); err != nil || len(f.engine.requests()) != 0 {

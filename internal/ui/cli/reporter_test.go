@@ -165,7 +165,7 @@ func TestPrompterPick(t *testing.T) {
 	pickMulti = func(_ string, choices []PickerItem) ([]PickerItem, error) {
 		shown = choices
 		out := append([]PickerItem(nil), choices...)
-		out[0].Selected = false
+		out[1].Selected = true
 		return out, nil
 	}
 	t.Cleanup(func() { pickMulti = PickMulti })
@@ -175,6 +175,9 @@ func TestPrompterPick(t *testing.T) {
 
 	if err != nil || len(got) != 1 || got[0].Site != "eporner" {
 		t.Fatalf("picked %+v err %v (same code on two sites must stay distinct)", got, err)
+	}
+	if shown[0].Selected || shown[1].Selected {
+		t.Fatal("nothing must be preselected")
 	}
 	if shown[0].Label != "abc-1 · One" || shown[0].Detail != "jable · 10:00 · ~214.6 MiB" || shown[1].Detail != "eporner · duration unknown" {
 		t.Fatalf("choices = %+v", shown)

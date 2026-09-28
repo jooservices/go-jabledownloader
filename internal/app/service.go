@@ -124,12 +124,13 @@ func (s *Service) RunItems(ctx context.Context, items []domain.Item) error {
 	if err != nil {
 		return err
 	}
+	if len(selected) == 0 {
+		s.emit(Cancelled{})
+		return nil
+	}
 	s.emit(PlanReady{Items: selected})
 	if s.Opts.DryRun {
 		s.emit(DryRun{})
-		return nil
-	}
-	if len(selected) == 0 {
 		return nil
 	}
 	if ok, err := s.confirm("Start download?"); err != nil || !ok {
