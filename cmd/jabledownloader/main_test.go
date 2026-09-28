@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,432 +13,407 @@ import (
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
+	"github.com/jooservices/go-jabledownloader/internal/domain"
+	"github.com/jooservices/go-jabledownloader/internal/engine"
 	"github.com/jooservices/go-jabledownloader/internal/site"
-	"github.com/jooservices/go-jabledownloader/internal/site/jable"
 	"github.com/jooservices/go-jabledownloader/internal/update"
-
-	// Register EPORNER so site auto-detection resolves its URLs.
-	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
 )
 
+// Real pages captured by internal/site/jable/fixtures_refresh_test.go.
+const jableFixtures = "../../internal/site/jable/testdata"
+
+type jableManifest struct {
+	VideoCode string `json:"video_code"`
+	VideoURL  string `json:"video_url"`
+}
+
+func loadJableManifest(t *testing.T) jableManifest {
+	t.Helper()
+	var m jableManifest
+	data, err := os.ReadFile(filepath.Join(jableFixtures, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// fixtureBrowser serves the real Jable video page for /videos/ URLs and the
+// real listing otherwise.
+type fixtureBrowser struct{ t *testing.T }
+
+func (f fixtureBrowser) FetchHTML(_ context.Context, url string, _ site.FetchMode) (string, error) {
+	name := "browse_page.html"
+	if strings.Contains(url, "/videos/") {
+		name = "video_page.html"
+	}
+	data, err := os.ReadFile(filepath.Join(jableFixtures, name))
+	return string(data), err
+}
+
+type fakeEngine struct{ reqs []engine.Request }
+
+func (e *fakeEngine) Download(_ context.Context, req engine.Request, sink domain.EventSink) (*engine.Result, error) {
+	e.reqs = append(e.reqs, req)
+	sink(domain.Event{Kind: domain.EventProgress, Done: 1, Total: 1, Bytes: 3})
+	path := filepath.Join(req.Dir, req.OutputName("h264"))
+	if err := os.MkdirAll(req.Dir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, []byte("mp4"), 0o644); err != nil {
+		return nil, err
+	}
+	return &engine.Result{Path: path, Size: 3, Codec: "h264"}, nil
+}
+
+type harness struct {
+	deps   deps
+	stdout *bytes.Buffer
+	stderr *bytes.Buffer
+	home   string
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OBS_ENDPOINT", "")
+	h := &harness{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, home: home}
+	h.deps = deps{
+		stdin:  strings.NewReader(""),
+		stdout: h.stdout,
+		stderr: h.stderr,
+		browser: func(context.Context) (site.Fetcher, func(), error) {
+			return fixtureBrowser{t: t}, func() {}, nil
+		},
+		latestRelease: func(context.Context) (*update.Release, error) { return nil, errors.New("offline") },
+		install:       func(context.Context, *update.Asset) ([]string, error) { return nil, nil },
+	}
+	return h
+}
+
+func (h *harness) run(args ...string) int {
+	return run(append(args, "--out", filepath.Join(h.home, "videos")), h.deps)
+}
+
+func withFakeEngine(t *testing.T) *fakeEngine {
+	t.Helper()
+	previous, err := engine.For(domain.SourceHLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeEngine{}
+	engine.Register(domain.SourceHLS, fake)
+	t.Cleanup(func() { engine.Register(domain.SourceHLS, previous) })
+	return fake
+}
+
 func TestRootCommandHasCommands(t *testing.T) {
-	root := newRootCmd()
+	root := newRootCmd(newHarness(t).deps)
 	names := map[string]bool{}
 	for _, c := range root.Commands() {
 		names[c.Name()] = true
 	}
-	for _, want := range []string{"get", "search", "latest", "hot", "update", "config", "completion"} {
+	for _, want := range []string{"download", "get", "latest", "search", "site", "update", "config", "completion"} {
 		if !names[want] {
 			t.Errorf("missing command %q", want)
 		}
 	}
 }
 
-func TestCompletionRejectsUnknownShell(t *testing.T) {
-	root := newRootCmd()
-	cmd := newCompletionCmd(root)
-	cmd.SetArgs([]string{"nope"})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error for unsupported shell")
+func TestRunExitCodes(t *testing.T) {
+	h := newHarness(t)
+	if code := run([]string{"--help"}, h.deps); code != exitOK {
+		t.Fatalf("--help exit = %d", code)
+	}
+	if code := run([]string{"--version"}, h.deps); code != exitOK || !strings.Contains(h.stdout.String(), version) {
+		t.Fatalf("--version exit = %d out=%q", code, h.stdout.String())
+	}
+	if code := run([]string{"bogus"}, h.deps); code != exitError || !strings.Contains(h.stderr.String(), "Error:") {
+		t.Fatalf("unknown command exit = %d", code)
+	}
+	if exitCodeFor(&app.PlanError{Failed: 1}) != exitPartial || exitCodeFor(&app.DiscoveryError{}) != exitPartial ||
+		exitCodeFor(errors.New("x")) != exitError || exitCodeFor(fmt.Errorf("download: %w", context.Canceled)) != exitInterrupted {
+		t.Fatal("exitCodeFor mapping")
 	}
 }
 
-func TestCompletionShells(t *testing.T) {
-	root := newRootCmd()
-	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
-		cmd := newCompletionCmd(root)
-		cmd.SetOut(io.Discard)
-		cmd.SetErr(io.Discard)
-		cmd.SetArgs([]string{shell})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("%s: %v", shell, err)
+func TestInterruptedRunExplainsResume(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	code := execute(ctx, []string{"download", loadJableManifest(t).VideoCode, "--out", t.TempDir()}, h.deps)
+
+	if code != exitInterrupted || !strings.Contains(h.stderr.String(), "re-run the same command to resume") {
+		t.Fatalf("exit=%d stderr=%q", code, h.stderr.String())
+	}
+}
+
+// `get --json` keys are a CLI contract (v4.3).
+func TestGetJSONUsesRealPageAndStableKeys(t *testing.T) {
+	h := newHarness(t)
+	m := loadJableManifest(t)
+
+	if code := h.run("get", m.VideoCode, "--json"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, h.stderr.String())
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(h.stdout.Bytes(), &detail); err != nil {
+		t.Fatalf("invalid JSON %q: %v", h.stdout.String(), err)
+	}
+	sources := detail["sources"].([]any)
+	src := sources[0].(map[string]any)
+	for _, key := range []string{"Kind", "URL", "Codec", "Height"} {
+		if _, ok := src[key]; !ok {
+			t.Errorf("source JSON missing %q: %v", key, src)
 		}
 	}
-}
-
-func TestEnvOr(t *testing.T) {
-	t.Setenv("JD_TEST_ENV_OR", "set-value")
-	if got := envOr("JD_TEST_ENV_OR", "fallback"); got != "set-value" {
-		t.Fatalf("got %q", got)
-	}
-	_ = os.Unsetenv("JD_TEST_ENV_OR_MISSING")
-	if got := envOr("JD_TEST_ENV_OR_MISSING", "fallback"); got != "fallback" {
-		t.Fatalf("got %q", got)
+	if detail["code"] != m.VideoCode || detail["site"] != "jable" {
+		t.Fatalf("detail = %v", detail)
 	}
 }
 
-func TestBaseService(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	rootFlags.workers = 4
-	rootFlags.outDir = t.TempDir()
-	rootFlags.dryRun = true
-	rootFlags.yes = true
-	rootFlags.quiet = true
-	rootFlags.noColor = true
-	rootFlags.verbose = false
-	rootFlags.force = false
-	t.Cleanup(func() {
-		rootFlags = struct {
-			outDir         string
-			workers        int
-			dryRun         bool
-			yes            bool
-			quiet          bool
-			noColor        bool
-			verbose        bool
-			force          bool
-			quality        string
-			subtitle       bool
-			subtitleMode   string
-			whisperModel   string
-			spokenLanguage string
-		}{}
-	})
-
-	svc, tel, err := baseService()
-	if err != nil {
-		t.Fatalf("baseService: %v", err)
+func TestGetText(t *testing.T) {
+	h := newHarness(t)
+	m := loadJableManifest(t)
+	if code := h.run("get", m.VideoURL); code != exitOK {
+		t.Fatalf("exit %d: %s", code, h.stderr.String())
 	}
-	if svc == nil || tel == nil {
-		t.Fatal("expected service and telemetry")
-	}
-	if svc.Config.WorkerCount != 4 {
-		t.Fatalf("workers = %d", svc.Config.WorkerCount)
-	}
-	if svc.Config.OutputDir != rootFlags.outDir {
-		t.Fatalf("outDir = %q", svc.Config.OutputDir)
-	}
-	if !svc.Opts.DryRun || !svc.Opts.Yes || !svc.Opts.Quiet {
-		t.Fatalf("unexpected opts: %+v", svc.Opts)
-	}
-	tel.Shutdown(context.Background())
-}
-
-func TestRunHelp(t *testing.T) {
-	oldArgs := os.Args
-	os.Args = []string{"jabledownloader", "--help"}
-	defer func() { os.Args = oldArgs }()
-	if code := run(); code != exitOK {
-		t.Fatalf("exit %d", code)
+	if out := h.stdout.String(); !strings.Contains(out, "Code:    "+m.VideoCode) || !strings.Contains(out, ".m3u8") || strings.Contains(out, "\033[") {
+		t.Fatalf("output = %q", out)
 	}
 }
 
-func TestRunUpdateUpToDate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	oldFetch := fetchLatestRelease
-	oldVer := version
-	defer func() {
-		fetchLatestRelease = oldFetch
-		version = oldVer
-	}()
-	version = "v9.9.9"
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return &update.Release{TagName: "v9.9.9"}, nil
+func TestDownloadWritesIntoSiteLayout(t *testing.T) {
+	h := newHarness(t)
+	fake := withFakeEngine(t)
+	m := loadJableManifest(t)
+
+	if code := h.run("download", m.VideoCode, "--workers", "3"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, h.stderr.String())
 	}
-	if err := runUpdate(context.Background()); err != nil {
-		t.Fatalf("runUpdate: %v", err)
+	want := filepath.Join(h.home, "videos", "jable", m.VideoCode)
+	if len(fake.reqs) != 1 || fake.reqs[0].Dir != want || fake.reqs[0].Workers != 3 {
+		t.Fatalf("requests = %+v", fake.reqs)
+	}
+	if ua := fake.reqs[0].Source.Headers.Get("Referer"); ua != "https://en.jable.tv/" {
+		t.Fatalf("source headers = %v", fake.reqs[0].Source.Headers)
+	}
+	if out := h.stdout.String(); !strings.Contains(out, "Downloaded: "+filepath.Join(want, m.VideoCode+"-h264.mp4")) {
+		t.Fatalf("output = %q", out)
+	}
+
+	h.stdout.Reset()
+	if code := h.run("download", m.VideoCode); code != exitOK || !strings.Contains(h.stdout.String(), "Already downloaded") {
+		t.Fatalf("second run exit=%d out=%q", code, h.stdout.String())
 	}
 }
 
-func TestRunUpdateCheckOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	oldFetch := fetchLatestRelease
-	oldVer := version
-	oldFlags := updateFlags
-	defer func() {
-		fetchLatestRelease = oldFetch
-		version = oldVer
-		updateFlags = oldFlags
-	}()
-	version = "v1.0.0"
-	updateFlags.checkOnly = true
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return &update.Release{TagName: "v9.9.9"}, nil
-	}
-	if err := runUpdate(context.Background()); err != nil {
-		t.Fatalf("runUpdate: %v", err)
-	}
-}
-
-func TestRunUpdateInstall(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	oldFetch := fetchLatestRelease
-	oldInstall := installRelease
-	oldVer := version
-	oldFlags := updateFlags
-	defer func() {
-		fetchLatestRelease = oldFetch
-		installRelease = oldInstall
-		version = oldVer
-		updateFlags = oldFlags
-	}()
-	version = "v1.0.0"
-	updateFlags.checkOnly = false
-	suffix := fmt.Sprintf("_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return &update.Release{
-			TagName: "v9.9.9",
-			Assets: []update.Asset{{
-				Name:               "jabledownloader_v9.9.9" + suffix,
-				BrowserDownloadURL: "http://example.invalid/a",
-				Size:               1_000_000,
-			}},
-		}, nil
-	}
-	called := false
-	installRelease = func(context.Context, *update.Asset) error {
-		called = true
-		return nil
-	}
-	if err := runUpdate(context.Background()); err != nil {
-		t.Fatalf("runUpdate: %v", err)
-	}
-	if !called {
-		t.Fatal("expected installRelease call")
-	}
-}
-
-func TestRunUpdateErrors(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	oldFetch := fetchLatestRelease
-	defer func() { fetchLatestRelease = oldFetch }()
-
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return nil, fmt.Errorf("boom")
-	}
-	if err := runUpdate(context.Background()); err == nil {
-		t.Fatal("expected error")
-	}
-
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return &update.Release{TagName: ""}, nil
-	}
-	if err := runUpdate(context.Background()); err == nil {
-		t.Fatal("expected empty tag error")
-	}
-
-	oldVer := version
-	version = "v1.0.0"
-	defer func() { version = oldVer }()
-	fetchLatestRelease = func(context.Context) (*update.Release, error) {
-		return &update.Release{TagName: "v9.9.9", Assets: nil}, nil
-	}
-	if err := runUpdate(context.Background()); err == nil {
-		t.Fatal("expected missing asset error")
-	}
-}
-
-func TestRunPartialExit(t *testing.T) {
-	if got := exitCodeFor(&app.PlanError{Failed: 2}); got != exitPartial {
-		t.Fatalf("PlanError code=%d want %d", got, exitPartial)
-	}
-	if got := exitCodeFor(errors.New("boom")); got != exitError {
-		t.Fatalf("generic error code=%d want %d", got, exitError)
-	}
-}
-
-func TestRunVersion(t *testing.T) {
-	old := os.Args
-	os.Args = []string{"jabledownloader", "--version"}
-	defer func() { os.Args = old }()
-	if code := run(); code != exitOK {
-		t.Fatalf("code=%d", code)
-	}
-}
-
-func TestRunErrorExit(t *testing.T) {
-	old := os.Args
-	os.Args = []string{"jabledownloader", "get"} // missing required arg
-	defer func() { os.Args = old }()
-	if code := run(); code != exitError {
-		t.Fatalf("code=%d want %d", code, exitError)
-	}
-}
-
-func TestSearchHasCountFlag(t *testing.T) {
-	cmd := newSearchCmd()
-	if cmd.Flags().Lookup("count") == nil {
-		t.Fatal("search missing --count")
-	}
-}
-
-func TestParseQuality(t *testing.T) {
-	cases := []struct {
-		in      string
-		want    int
-		wantErr bool
-	}{
-		{"best", 0, false},
-		{"", 0, false},
-		{"720", 720, false},
-		{"720p", 720, false},
-		{"481", 0, true},
-		{"nope", 0, true},
-		{"0", 0, true},
-	}
-	for _, tc := range cases {
-		got, err := parseQuality(tc.in)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("parseQuality(%q): expected error", tc.in)
+func TestDownloadRejectsBadInputsBeforeWork(t *testing.T) {
+	m := loadJableManifest(t)
+	for name, args := range map[string][]string{
+		"name path":     {"download", m.VideoCode, "--name", "../x.mp4"},
+		"quality":       {"download", m.VideoCode, "--quality", "4k"},
+		"path template": {"download", m.VideoCode, "--path-template", "../{code}"},
+		"subtitle mode": {"download", m.VideoCode, "--subtitle-mode", "burn"},
+		"subtitle lang": {"download", m.VideoCode, "--subtitle", "--subtitle-lang", "../x"},
+		"translator":    {"download", m.VideoCode, "--subtitle", "--translator", "missing"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			fake := withFakeEngine(t)
+			if code := h.run(args...); code != exitError || len(fake.reqs) != 0 {
+				t.Fatalf("exit=%d downloads=%d stderr=%q", code, len(fake.reqs), h.stderr.String())
 			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("parseQuality(%q): %v", tc.in, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("parseQuality(%q)=%d want %d", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestConfigCommandSetGet(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	root := newRootCmd()
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"config", "set", "worker_count", "8"})
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	root.SetArgs([]string{"config", "set", "output_dir", "/tmp/jable-out"})
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	root.SetArgs([]string{"config"})
-	var show strings.Builder
-	root.SetOut(&show)
-	if err := root.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(show.String(), "worker_count") || !strings.Contains(show.String(), "8") {
-		t.Fatalf("show output: %q", show.String())
-	}
-
-	for _, key := range []string{"worker_count", "output_dir", "path"} {
-		var buf strings.Builder
-		root.SetOut(&buf)
-		root.SetArgs([]string{"config", "get", key})
-		if err := root.Execute(); err != nil {
-			t.Fatalf("get %s: %v", key, err)
-		}
-		if strings.TrimSpace(buf.String()) == "" {
-			t.Fatalf("empty get %s", key)
-		}
-	}
-
-	root.SetOut(io.Discard)
-	root.SetArgs([]string{"config", "get", "nope"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected unknown get key error")
-	}
-	root.SetArgs([]string{"config", "set", "worker_count", "0"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected invalid worker_count error")
-	}
-	root.SetArgs([]string{"config", "set", "output_dir", "  "})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected empty output_dir error")
-	}
-	root.SetArgs([]string{"config", "set", "nope", "x"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected unknown set key error")
-	}
-}
-
-func TestNewScrapeServiceErrorSurfacesOnJable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	rootFlags.noColor = true
-	root := newRootCmd()
-
-	old := newBrowser
-	defer func() { newBrowser = old }()
-
-	newBrowser = func(context.Context) (*jable.Browser, error) {
-		return nil, fmt.Errorf("no chrome")
-	}
-	svc, cleanup, err := newScrapeService(root)
-	if err != nil {
-		t.Fatalf("newScrapeService should not fail eagerly: %v", err)
-	}
-	defer cleanup()
-	if _, err := svc.Sites.Jable(); err == nil {
-		t.Fatal("expected error when jable requests a browser")
-	}
-}
-
-type fixtureFetcher struct {
-	video  string
-	browse string
-}
-
-func (f *fixtureFetcher) FetchHTML(_ context.Context, url string, _ site.FetchMode) (string, error) {
-	if strings.Contains(url, "/videos/") {
-		return f.video, nil
-	}
-	return f.browse, nil
-}
-
-func loadJableFixture(name string) string {
-	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "site", "jable", "testdata", name))
-	if err != nil {
-		panic(err)
-	}
-	return string(data)
-}
-
-func withFixtureSites(t *testing.T) {
-	t.Helper()
-	old := newSites
-	t.Cleanup(func() { newSites = old })
-	newSites = func(_ func(context.Context) (site.Fetcher, func(), error)) *app.Sites {
-		return app.NewSites(func(context.Context) (site.Fetcher, func(), error) {
-			return &fixtureFetcher{
-				video:  loadJableFixture("video_page.html"),
-				browse: loadJableFixture("browse_page.html"),
-			}, func() {}, nil
 		})
 	}
 }
 
-func executeCommand(t *testing.T, args ...string) error {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	rootFlags.noColor = true
-	root := newRootCmd()
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs(args)
-	return root.Execute()
-}
-
-func TestGetCommandDryRun(t *testing.T) {
-	withFixtureSites(t)
-	if err := executeCommand(t, "get", "jur-827", "--dry-run"); err != nil {
-		t.Fatalf("get: %v", err)
+func TestDownloadDryRun(t *testing.T) {
+	h := newHarness(t)
+	fake := withFakeEngine(t)
+	if code := h.run("download", loadJableManifest(t).VideoCode, "--dry-run"); code != exitOK || len(fake.reqs) != 0 {
+		t.Fatalf("exit=%d downloads=%d", code, len(fake.reqs))
+	}
+	if !strings.Contains(h.stdout.String(), "Dry run") {
+		t.Fatalf("output = %q", h.stdout.String())
 	}
 }
 
-func TestLatestCommandDryRun(t *testing.T) {
-	withFixtureSites(t)
-	if err := executeCommand(t, "latest", "--count", "2", "--dry-run"); err != nil {
-		t.Fatalf("latest: %v", err)
+func TestDiscoveryCommands(t *testing.T) {
+	m := loadJableManifest(t)
+	for name, args := range map[string][]string{
+		"latest":      {"latest", "--site", "jable", "--count", "2"},
+		"search":      {"search", "cute", "girl", "--site", "jable"},
+		"site list":   {"site", "jable", "list", "--view", "hot"},
+		"site search": {"site", "jable", "search", "cute"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if code := h.run(args...); code != exitOK {
+				t.Fatalf("exit %d: %s", code, h.stderr.String())
+			}
+			if out := h.stdout.String(); !strings.Contains(out, m.VideoCode) || !strings.Contains(out, "jable") {
+				t.Fatalf("output = %q", out)
+			}
+		})
 	}
 }
 
-func TestHotCommandDryRun(t *testing.T) {
-	withFixtureSites(t)
-	if err := executeCommand(t, "hot", "--count", "2", "--dry-run"); err != nil {
-		t.Fatalf("hot: %v", err)
+func TestDiscoveryJSONKeepsStdoutClean(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("latest", "--site", "jable", "--json", "--count", "3"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, h.stderr.String())
+	}
+	var items []domain.Item
+	if err := json.Unmarshal(h.stdout.Bytes(), &items); err != nil || len(items) != 3 {
+		t.Fatalf("stdout is not the JSON list: %q (%v)", h.stdout.String(), err)
 	}
 }
 
-func TestSearchCommandDryRun(t *testing.T) {
-	withFixtureSites(t)
-	if err := executeCommand(t, "search", "cute", "--count", "2", "--dry-run"); err != nil {
-		t.Fatalf("search: %v", err)
+func TestDiscoveryDownloadWithYes(t *testing.T) {
+	h := newHarness(t)
+	fake := withFakeEngine(t)
+	if code := h.run("latest", "--site", "jable", "--count", "1", "--download", "--yes"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, h.stderr.String())
+	}
+	if len(fake.reqs) != 1 {
+		t.Fatalf("downloads = %d", len(fake.reqs))
+	}
+}
+
+func TestDiscoveryErrors(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("site", "jable", "list", "--view", "bogus"); code != exitPartial || !strings.Contains(h.stderr.String(), "valid: latest, hot") {
+		t.Fatalf("exit=%d stderr=%q", code, h.stderr.String())
+	}
+	if code := h.run("site", "bogus"); code != exitError || !strings.Contains(h.stderr.String(), "requires list or search") {
+		t.Fatalf("unknown site exit = %d", code)
+	}
+}
+
+func TestConfigCommands(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{
+		{"config", "set", "output_dir", "/tmp/videos"},
+		{"config", "set", "worker_count", "8"},
+		{"config", "set", "path_template", "{site}-{code}"},
+	} {
+		if code := run(args, h.deps); code != exitOK {
+			t.Fatalf("%v exit %d: %s", args, code, h.stderr.String())
+		}
+	}
+	h.stdout.Reset()
+	if code := run([]string{"config", "get", "path_template"}, h.deps); code != exitOK || strings.TrimSpace(h.stdout.String()) != "{site}-{code}" {
+		t.Fatalf("get path_template = %q", h.stdout.String())
+	}
+	if code := run([]string{"config"}, h.deps); code != exitOK || !strings.Contains(h.stdout.String(), "worker_count:  8") {
+		t.Fatalf("config show = %q", h.stdout.String())
+	}
+	for _, key := range []string{"output_dir", "worker_count", "path"} {
+		if code := run([]string{"config", "get", key}, h.deps); code != exitOK {
+			t.Fatalf("get %s failed", key)
+		}
+	}
+	for _, args := range [][]string{
+		{"config", "set", "path_template", "../{code}"},
+		{"config", "set", "path_template", "{site}"},
+		{"config", "set", "worker_count", "0"},
+		{"config", "set", "output_dir", " "},
+		{"config", "set", "bogus", "x"},
+		{"config", "get", "bogus"},
+	} {
+		if code := run(args, h.deps); code != exitError {
+			t.Errorf("%v exit = %d, want error", args, code)
+		}
+	}
+}
+
+func TestUpdateCommand(t *testing.T) {
+	asset := update.Asset{Name: "jabledownloader_v9.9.9_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz", Size: 1}
+	latest := func(tag string, assets ...update.Asset) func(context.Context) (*update.Release, error) {
+		return func(context.Context) (*update.Release, error) {
+			return &update.Release{TagName: tag, Assets: assets}, nil
+		}
+	}
+	for name, tc := range map[string]struct {
+		release func(context.Context) (*update.Release, error)
+		install func(context.Context, *update.Asset) ([]string, error)
+		args    []string
+		code    int
+		want    string
+	}{
+		"up to date":  {latest("dev"), nil, nil, exitOK, "Current:"},
+		"check only":  {latest("v9.9.9"), nil, []string{"--check"}, exitOK, "newer version is available"},
+		"install":     {latest("v9.9.9", asset), func(context.Context, *update.Asset) ([]string, error) { return []string{"old binary kept"}, nil }, nil, exitOK, "warning: old binary kept"},
+		"no asset":    {latest("v9.9.9"), nil, nil, exitError, ""},
+		"no tag":      {latest(""), nil, nil, exitError, ""},
+		"offline":     {nil, nil, nil, exitError, ""},
+		"install err": {latest("v9.9.9", asset), func(context.Context, *update.Asset) ([]string, error) { return nil, errors.New("checksum mismatch") }, nil, exitError, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if tc.release != nil {
+				h.deps.latestRelease = tc.release
+			}
+			if tc.install != nil {
+				h.deps.install = tc.install
+			}
+			old := version
+			version = "v1.0.0"
+			if name == "up to date" {
+				version = "v9.9.9"
+				h.deps.latestRelease = latest("v9.9.9")
+			}
+			defer func() { version = old }()
+
+			code := run(append([]string{"update"}, tc.args...), h.deps)
+
+			if code != tc.code || !strings.Contains(h.stdout.String(), tc.want) {
+				t.Fatalf("exit=%d out=%q err=%q", code, h.stdout.String(), h.stderr.String())
+			}
+		})
+	}
+}
+
+func TestCompletion(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		h := newHarness(t)
+		if code := run([]string{"completion", shell}, h.deps); code != exitOK || h.stdout.Len() == 0 {
+			t.Fatalf("%s exit=%d", shell, code)
+		}
+	}
+	if code := run([]string{"completion", "tcsh"}, newHarness(t).deps); code != exitError {
+		t.Fatal("expected unsupported shell error")
+	}
+}
+
+func TestTelemetryConfigWarning(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("OBS_ENDPOINT", "http://obs.example.test")
+	t.Setenv("OBS_USER", "user")
+	if code := h.run("download", loadJableManifest(t).VideoCode, "--dry-run"); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.stderr.String(), "warning: telemetry disabled") {
+		t.Fatalf("stderr = %q", h.stderr.String())
+	}
+}
+
+func TestParseQualityAndEnvOr(t *testing.T) {
+	for in, want := range map[string]int{"": 0, "best": 0, "720": 720, "1080p": 1080, " 480P ": 480} {
+		if got, err := parseQuality(in); err != nil || got != want {
+			t.Errorf("parseQuality(%q) = %d, %v", in, got, err)
+		}
+	}
+	if _, err := parseQuality("4k"); err == nil {
+		t.Fatal("expected invalid quality")
+	}
+	t.Setenv("JD_TEST_ENV", "set")
+	if envOr("JD_TEST_ENV", "x") != "set" || envOr("JD_TEST_UNSET", "x") != "x" {
+		t.Fatal("envOr")
 	}
 }

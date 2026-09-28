@@ -2,88 +2,90 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/jooservices/go-jabledownloader/internal/platform/httpx"
 	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
-// Sites builds site implementations with the fetcher each provider needs.
-// Jable requires a browser (Cloudflare) and starts it lazily on first use;
-// EPORNER and other server-rendered sites use a plain HTTP fetcher.
-type Sites struct {
-	browserFactory func(ctx context.Context) (site.Fetcher, func(), error)
-	httpCli        *http.Client
+// BrowserFactory starts the shared browser fetcher and returns its cleanup.
+type BrowserFactory func(ctx context.Context) (site.Fetcher, func(), error)
 
-	mu             sync.Mutex
-	browserFetcher site.Fetcher
-	cleanup        func()
+// Sites builds registered sites with the fetcher each one declares. The
+// browser is started lazily, once, on the first browser-backed site.
+type Sites struct {
+	newBrowser BrowserFactory
+	pageClient *http.Client
+
+	mu      sync.Mutex
+	browser site.Fetcher
+	cleanup func()
 }
 
-// NewSites assembles the site registry. browserFactory is called once, lazily,
-// when a browser-backed site (jable) is first requested.
-func NewSites(browserFactory func(ctx context.Context) (site.Fetcher, func(), error)) *Sites {
+// NewSites returns a site builder; newBrowser may be nil when no
+// browser-backed site is used.
+func NewSites(newBrowser BrowserFactory) *Sites {
 	return &Sites{
-		browserFactory: browserFactory,
-		httpCli:        site.NewHeaderClient("https://www.eporner.com/"),
+		newBrowser: newBrowser,
+		pageClient: httpx.NewClient(httpx.Options{Timeout: 60 * time.Second}),
 	}
 }
 
-// httpClient returns the client used for direct downloads (headers set).
-func (s *Sites) httpClient() *http.Client {
-	return s.httpCli
-}
-
-// For auto-detects the site from a CLI input and builds it.
+// For detects the site for a URL or bare code and builds it.
 func (s *Sites) For(input string) (site.Site, error) {
-	name, err := site.DetectName(input)
+	d, err := site.Detect(input)
 	if err != nil {
 		return nil, err
 	}
-	return s.build(name)
+	return s.build(d)
 }
 
-// Jable returns the Jable site, used by the listing commands.
-func (s *Sites) Jable() (site.Site, error) {
-	return s.build("jable")
+// ByName builds a registered site by name.
+func (s *Sites) ByName(name string) (site.Site, error) {
+	d, err := site.Lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	return s.build(d)
 }
 
-// Close releases lazily-created browser resources.
+// Close releases the browser if one was started.
 func (s *Sites) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cleanup != nil {
 		s.cleanup()
-		s.cleanup = nil
+		s.cleanup, s.browser = nil, nil
 	}
 }
 
-func (s *Sites) build(name string) (site.Site, error) {
-	switch name {
-	case "jable":
-		fetcher, err := s.browser()
-		if err != nil {
-			return nil, err
-		}
-		return site.New("jable", fetcher)
-	default:
-		return site.New(name, site.NewHTTPFetcher(s.httpCli))
+func (s *Sites) build(d site.Descriptor) (site.Site, error) {
+	if d.Fetcher != site.FetcherBrowser {
+		return d.New(site.NewHTTPFetcher(s.pageClient, d.Headers)), nil
 	}
+	browser, err := s.sharedBrowser()
+	if err != nil {
+		return nil, err
+	}
+	return d.New(browser), nil
 }
 
-func (s *Sites) browser() (site.Fetcher, error) {
+func (s *Sites) sharedBrowser() (site.Fetcher, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.browserFetcher == nil {
-		if s.browserFactory == nil {
-			return nil, fmt.Errorf("no browser factory configured")
-		}
-		fetcher, cleanup, err := s.browserFactory(context.Background())
-		if err != nil {
-			return nil, err
-		}
-		s.browserFetcher, s.cleanup = fetcher, cleanup
+	if s.browser != nil {
+		return s.browser, nil
 	}
-	return s.browserFetcher, nil
+	if s.newBrowser == nil {
+		return nil, errors.New("no browser configured")
+	}
+	browser, cleanup, err := s.newBrowser(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	s.browser, s.cleanup = browser, cleanup
+	return browser, nil
 }

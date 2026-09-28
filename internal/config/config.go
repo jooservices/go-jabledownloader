@@ -10,8 +10,9 @@ import (
 
 // Config holds user-level CLI settings persisted as JSON.
 type Config struct {
-	OutputDir   string `json:"output_dir,omitempty"`
-	WorkerCount int    `json:"worker_count,omitempty"`
+	OutputDir    string `json:"output_dir,omitempty"`
+	PathTemplate string `json:"path_template,omitempty"`
+	WorkerCount  int    `json:"worker_count,omitempty"`
 }
 
 // DefaultWorkerCount is used when neither the config file nor flags set one.
@@ -75,6 +76,9 @@ func applyDefaults(c *Config) *Config {
 	}
 	if c.OutputDir == "" {
 		c.OutputDir = "./videos"
+	}
+	if c.PathTemplate == "" {
+		c.PathTemplate = "{site}/{code}"
 	}
 	return c
 }

@@ -2,58 +2,91 @@ package site
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 )
 
-// Factory builds a site implementation on top of an injected Fetcher.
-type Factory func(fetcher Fetcher) Site
+// FetcherKind selects how a site's pages are fetched.
+type FetcherKind int
 
-type descriptor struct {
-	name   string
-	hosts  []string
-	codeRe *regexp.Regexp // bare-code heuristic; nil = URLs only
-	newFn  Factory
+const (
+	// FetcherHTTP fetches server-rendered pages with a plain HTTP client.
+	FetcherHTTP FetcherKind = iota
+	// FetcherBrowser fetches pages with the shared headless browser.
+	FetcherBrowser
+)
+
+// Descriptor declares how a site is detected, built, and fetched.
+type Descriptor struct {
+	Name    string
+	Hosts   []string       // URL hosts handled (exact or subdomain)
+	CodeRe  *regexp.Regexp // recognises a bare code input; nil = URLs only
+	Fetcher FetcherKind
+	Views   []string    // valid ListOptions.View values
+	Headers http.Header // extra headers for page requests (FetcherHTTP)
+	New     func(Fetcher) Site
 }
 
-var descriptors []descriptor
+var descriptors []Descriptor
 
-// Register adds a site to the registry. hosts are matched against the URL
-// host (exact or subdomain); codeRe, when set, recognizes a bare code input.
-func Register(name string, hosts []string, codeRe *regexp.Regexp, newFn Factory) {
-	descriptors = append(descriptors, descriptor{name: name, hosts: hosts, codeRe: codeRe, newFn: newFn})
+// Register adds a site. It panics on programmer errors (missing name or
+// factory, duplicate name) because registration happens in init.
+func Register(d Descriptor) {
+	if d.Name == "" || d.New == nil {
+		panic("site.Register requires a name and a factory")
+	}
+	if _, err := Lookup(d.Name); err == nil {
+		panic(fmt.Sprintf("duplicate site registration %q", d.Name))
+	}
+	descriptors = append(descriptors, d)
 }
 
-// New builds a site implementation by registered name.
-func New(name string, fetcher Fetcher) (Site, error) {
+// Lookup returns the descriptor registered under name.
+func Lookup(name string) (Descriptor, error) {
 	for _, d := range descriptors {
-		if d.name == name {
-			return d.newFn(fetcher), nil
+		if d.Name == name {
+			return d, nil
 		}
 	}
-	return nil, fmt.Errorf("unknown site %q", name)
+	return Descriptor{}, fmt.Errorf("unknown site %q (available: %s)", name, strings.Join(Names(), ", "))
 }
 
-// DetectName auto-detects the site from a CLI input: URL hosts select the
-// site; bare inputs fall back to per-site code heuristics.
-func DetectName(input string) (string, error) {
-	if parsed, err := url.Parse(strings.TrimSpace(input)); err == nil && parsed.Host != "" {
-		host := strings.ToLower(parsed.Hostname())
+// Names lists the registered site names in registration order.
+func Names() []string {
+	names := make([]string, 0, len(descriptors))
+	for _, d := range descriptors {
+		names = append(names, d.Name)
+	}
+	return names
+}
+
+// Detect returns the site for a CLI input: URL hosts select the site; bare
+// inputs fall back to each site's code pattern.
+func Detect(input string) (Descriptor, error) {
+	input = strings.TrimSpace(input)
+	if parsed, err := url.Parse(input); err == nil && parsed.Host != "" {
+		host := parsed.Hostname()
 		for _, d := range descriptors {
-			for _, h := range d.hosts {
+			for _, h := range d.Hosts {
 				if HostMatches(host, h) {
-					return d.name, nil
+					return d, nil
 				}
 			}
 		}
-		return "", fmt.Errorf("%w: no site handles host %q", ErrUnsupportedInput, host)
+		return Descriptor{}, fmt.Errorf("%w: no site handles host %q", ErrUnsupportedInput, host)
 	}
-
 	for _, d := range descriptors {
-		if d.codeRe != nil && d.codeRe.MatchString(strings.TrimSpace(input)) {
-			return d.name, nil
+		if d.CodeRe != nil && d.CodeRe.MatchString(input) {
+			return d, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %q", ErrUnsupportedInput, input)
+	return Descriptor{}, fmt.Errorf("%w: %q", ErrUnsupportedInput, input)
+}
+
+// HostMatches reports whether host equals or is a subdomain of pattern.
+func HostMatches(host, pattern string) bool {
+	host, pattern = strings.ToLower(host), strings.ToLower(pattern)
+	return host == pattern || strings.HasSuffix(host, "."+pattern)
 }

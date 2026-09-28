@@ -1,159 +1,169 @@
-package site_test
+package site
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 
-	"github.com/jooservices/go-jabledownloader/internal/site"
-
-	// Register the built-in sites so DetectName/New resolve them.
-	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
-	_ "github.com/jooservices/go-jabledownloader/internal/site/jable"
+	"github.com/jooservices/go-jabledownloader/internal/domain"
 )
 
+type stubSite struct{ name string }
+
+func (s stubSite) Name() string { return s.name }
+func (stubSite) List(context.Context, ListOptions) ([]domain.Item, error) {
+	return nil, nil
+}
+func (stubSite) Search(context.Context, string, int) ([]domain.Item, error) { return nil, nil }
+func (stubSite) Detail(context.Context, string) (*domain.Detail, error)     { return nil, nil }
+
+// withRegistry isolates the package registry for one test.
+func withRegistry(t *testing.T, ds ...Descriptor) {
+	t.Helper()
+	saved := descriptors
+	descriptors = nil
+	t.Cleanup(func() { descriptors = saved })
+	for _, d := range ds {
+		Register(d)
+	}
+}
+
+func descriptor(name string, hosts []string, code string) Descriptor {
+	d := Descriptor{Name: name, Hosts: hosts, New: func(Fetcher) Site { return stubSite{name: name} }}
+	if code != "" {
+		d.CodeRe = regexp.MustCompile(code)
+	}
+	return d
+}
+
+func TestDetect(t *testing.T) {
+	withRegistry(t,
+		descriptor("alpha", []string{"alpha.test"}, `^[a-z]+-\d+$`),
+		descriptor("beta", []string{"beta.test"}, ""),
+	)
+	for _, tc := range []struct {
+		input, want string
+	}{
+		{"abc-123", "alpha"},
+		{" https://www.alpha.test/videos/abc-1/ ", "alpha"},
+		{"https://BETA.test/video-1/", "beta"},
+	} {
+		d, err := Detect(tc.input)
+		if err != nil || d.Name != tc.want {
+			t.Errorf("Detect(%q) = %q, %v; want %q", tc.input, d.Name, err, tc.want)
+		}
+	}
+	for _, bad := range []string{"not a code", "https://evil.test/abc-1", "https://alpha.test.evil.test/"} {
+		if _, err := Detect(bad); !errors.Is(err, ErrUnsupportedInput) {
+			t.Errorf("Detect(%q) err = %v", bad, err)
+		}
+	}
+}
+
+func TestRegisterAndLookup(t *testing.T) {
+	withRegistry(t, descriptor("alpha", nil, ""), descriptor("beta", nil, ""))
+
+	if got := strings.Join(Names(), ","); got != "alpha,beta" {
+		t.Fatalf("Names = %s", got)
+	}
+	d, err := Lookup("beta")
+	if err != nil || d.New(nil).Name() != "beta" {
+		t.Fatalf("Lookup = %+v, %v", d, err)
+	}
+	if _, err := Lookup("gamma"); err == nil || !strings.Contains(err.Error(), "available: alpha, beta") {
+		t.Fatalf("unknown Lookup err = %v", err)
+	}
+}
+
+func TestRegisterPanicsOnProgrammerErrors(t *testing.T) {
+	withRegistry(t, descriptor("alpha", nil, ""))
+	for name, d := range map[string]Descriptor{
+		"duplicate":  descriptor("alpha", nil, ""),
+		"no name":    {New: func(Fetcher) Site { return nil }},
+		"no factory": {Name: "gamma"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			Register(d)
+		})
+	}
+}
+
 func TestHostMatches(t *testing.T) {
-	cases := []struct {
+	for _, tc := range []struct {
 		host, pattern string
 		want          bool
 	}{
 		{"www.eporner.com", "eporner.com", true},
-		{"eporner.com", "eporner.com", true},
-		{"en.jable.tv", "jable.tv", true},
-		{"jable.tv", "jable.tv", true},
-		{"example.com", "eporner.com", false},
+		{"EPORNER.com", "eporner.com", true},
 		{"eporner.com.evil.test", "eporner.com", false},
-	}
-	for _, tc := range cases {
-		if got := site.HostMatches(tc.host, tc.pattern); got != tc.want {
-			t.Errorf("HostMatches(%q, %q) = %v, want %v", tc.host, tc.pattern, got, tc.want)
+		{"noteporner.com", "eporner.com", false},
+	} {
+		if got := HostMatches(tc.host, tc.pattern); got != tc.want {
+			t.Errorf("HostMatches(%q, %q) = %v", tc.host, tc.pattern, got)
 		}
 	}
 }
 
-func TestDetectName(t *testing.T) {
-	cases := []struct {
-		in      string
-		want    string
-		wantErr bool
-	}{
-		{"jur-827", "jable", false},
-		{"https://en.jable.tv/videos/jur-827/", "jable", false},
-		{"https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/", "eporner", false},
-		{"not a code", "", true},
-		{"https://example.com/videos/jur-827/", "", true},
+func TestCheckView(t *testing.T) {
+	views := []string{"latest", "hot"}
+	if got, err := CheckView("alpha", views, ""); err != nil || got != "latest" {
+		t.Fatalf("empty view = %q, %v", got, err)
 	}
-	for _, tc := range cases {
-		got, err := site.DetectName(tc.in)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("DetectName(%q): expected error", tc.in)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("DetectName(%q): %v", tc.in, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("DetectName(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+	if got, err := CheckView("alpha", views, " hot "); err != nil || got != "hot" {
+		t.Fatalf("hot = %q, %v", got, err)
+	}
+	if _, err := CheckView("alpha", views, "../admin"); err == nil || !strings.Contains(err.Error(), "valid: latest, hot") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
-type stubFetcher struct{}
-
-func (stubFetcher) FetchHTML(context.Context, string, site.FetchMode) (string, error) {
-	return "<html></html>", nil
-}
-
-func TestNewUnknownSite(t *testing.T) {
-	if _, err := site.New("nope", stubFetcher{}); err == nil {
-		t.Fatal("expected error for unknown site")
-	}
-}
-
-func TestNewKnownSites(t *testing.T) {
-	for _, name := range []string{"jable", "eporner"} {
-		st, err := site.New(name, stubFetcher{})
-		if err != nil {
-			t.Fatalf("New(%q): %v", name, err)
-		}
-		if st.Name() != name {
-			t.Fatalf("site name = %q, want %q", st.Name(), name)
-		}
-	}
-}
-
-func TestNewHeaderClientSetsHeaders(t *testing.T) {
-	var ua, ref, accept string
+func TestHTTPFetcherSendsHeadersAndReturnsBody(t *testing.T) {
+	var referer string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ua, ref, accept = r.Header.Get("User-Agent"), r.Header.Get("Referer"), r.Header.Get("Accept")
-		w.WriteHeader(http.StatusOK)
+		referer = r.Referer()
+		_, _ = w.Write([]byte("<html>ok</html>"))
 	}))
 	defer srv.Close()
+	f := NewHTTPFetcher(srv.Client(), http.Header{"Referer": {"https://site.test/"}})
 
-	c := site.NewHeaderClient("https://example.test/")
-	resp, err := c.Get(srv.URL)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	resp.Body.Close()
+	body, err := f.FetchHTML(context.Background(), srv.URL, FetchReady)
 
-	if ua == "" || ref != "https://example.test/" || accept == "" {
-		t.Fatalf("headers ua=%q ref=%q accept=%q", ua, ref, accept)
+	if err != nil || body != "<html>ok</html>" || referer != "https://site.test/" {
+		t.Fatalf("body=%q referer=%q err=%v", body, referer, err)
 	}
 }
 
-func TestNewHeaderClientRedirectEncodesSpaces(t *testing.T) {
-	var seenQuery string
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenQuery = r.URL.RawQuery
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer target.Close()
-
-	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL+"/f.mp4?dload=hello world x.mp4", http.StatusFound)
-	}))
-	defer src.Close()
-
-	c := site.NewHeaderClient("https://example.test/")
-	resp, err := c.Get(src.URL)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	resp.Body.Close()
-
-	if seenQuery != "dload=hello%20world%20x.mp4" {
-		t.Fatalf("redirect query = %q, want space-encoded", seenQuery)
-	}
-}
-
-func TestHTTPFetcher(t *testing.T) {
+func TestHTTPFetcherErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/ok":
-			fmt.Fprint(w, "<html>ok</html>")
-		case "/err":
-			http.Error(w, "nope", http.StatusForbidden)
-		default:
-			http.NotFound(w, r)
+		if r.URL.Path == "/big" {
+			_, _ = w.Write(make([]byte, maxHTMLSize+1))
+			return
 		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
+	f := NewHTTPFetcher(srv.Client(), nil)
 
-	f := site.NewHTTPFetcher(&http.Client{})
-	body, err := f.FetchHTML(context.Background(), srv.URL+"/ok", site.FetchReady)
-	if err != nil || body != "<html>ok</html>" {
-		t.Fatalf("FetchHTML = %q, %v", body, err)
+	if _, err := f.FetchHTML(context.Background(), srv.URL+"/missing", FetchReady); err == nil || !strings.Contains(err.Error(), "http 404") {
+		t.Fatalf("404 err = %v", err)
 	}
-	if _, err := f.FetchHTML(context.Background(), srv.URL+"/err", site.FetchReady); err == nil {
-		t.Fatal("expected error for non-200")
+	if _, err := f.FetchHTML(context.Background(), srv.URL+"/big", FetchReady); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversize err = %v", err)
 	}
-	if _, err := f.FetchHTML(context.Background(), "http://127.0.0.1:1/x", site.FetchReady); err == nil {
-		t.Fatal("expected error for unreachable")
+	if _, err := f.FetchHTML(context.Background(), "://bad", FetchReady); err == nil {
+		t.Fatal("expected bad URL error")
+	}
+	srv.Close()
+	if _, err := f.FetchHTML(context.Background(), srv.URL, FetchReady); err == nil {
+		t.Fatal("expected transport error")
 	}
 }
