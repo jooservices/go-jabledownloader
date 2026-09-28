@@ -121,14 +121,14 @@ func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]domain.
 	return extractBrowseItems(doc), nil
 }
 
+// extractBrowseItems reads the listing's video cards (div.mb). Links
+// elsewhere on the page (menus, promos) are ignored.
 func extractBrowseItems(doc *goquery.Document) []domain.Item {
 	items := make([]domain.Item, 0)
 	seen := make(map[string]struct{})
-	doc.Find(`a[href*="/video-"]`).Each(func(_ int, link *goquery.Selection) {
-		href, ok := link.Attr("href")
-		if !ok {
-			return
-		}
+	doc.Find("div.mb").Each(func(_ int, card *goquery.Selection) {
+		link := card.Find(`a[href*="/video-"]`).First()
+		href, _ := link.Attr("href")
 		code := videoID(href)
 		if code == "" {
 			return
@@ -137,31 +137,14 @@ func extractBrowseItems(doc *goquery.Document) []domain.Item {
 			return
 		}
 		seen[code] = struct{}{}
-
-		card := link.ParentsFiltered("article, li, .video-item, .video-box, .mb").First()
-		if card.Length() == 0 {
-			card = link.Parent()
-		}
-		title := firstNonEmpty(
-			attr(link, "title"),
-			attr(card.Find("img").First(), "alt"),
-			strings.TrimSpace(link.Text()),
-		)
-		if title == "" {
-			title = code
-		}
-		thumbnail := firstNonEmpty(
-			attr(card.Find("img").First(), "data-src"),
-			attr(card.Find("img").First(), "data-original"),
-			attr(card.Find("img").First(), "src"),
-		)
+		img := card.Find("img").First()
 		items = append(items, domain.Item{
 			Site:         "eporner",
 			Code:         code,
-			Title:        title,
+			Title:        firstNonEmpty(card.Find(".mbtit a").First().Text(), attr(img, "alt"), code),
 			URL:          absoluteURL(href),
-			ThumbnailURL: thumbnail,
-			Duration:     durationRe.FindString(card.Text()),
+			ThumbnailURL: firstNonEmpty(attr(img, "data-src"), attr(img, "data-original"), attr(img, "src")),
+			Duration:     durationRe.FindString(card.Find(".mbtim").First().Text()),
 		})
 	})
 	return items

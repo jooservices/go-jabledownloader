@@ -139,7 +139,8 @@ func TestListParsesRealListing(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, item := range items {
-		if item.Site != "eporner" || !domain.ValidCode(item.Code) || item.Title == "" || !strings.HasPrefix(item.URL, BaseURL+"/video-") || seen[item.Code] {
+		if item.Site != "eporner" || !domain.ValidCode(item.Code) || item.Title == "" || !strings.HasPrefix(item.URL, BaseURL+"/video-") ||
+			!durationRe.MatchString(item.Duration) || seen[item.Code] {
 			t.Fatalf("bad item %+v", item)
 		}
 		seen[item.Code] = true

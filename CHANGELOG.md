@@ -44,6 +44,10 @@ No unreleased changes.
 
 ### Fixed
 
+- The video picker starts with nothing selected; confirming an empty
+  selection downloads nothing
+- EPORNER listings showed "duration unknown" for every video
+
 - EPORNER downloads: the media client lost the redirect space-encoding and
   the desktop User-Agent
 - Media transfers could hang forever on a stalled connection (idle timeout)
