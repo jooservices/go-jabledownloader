@@ -1,217 +1,294 @@
 package jable
 
+// Fixtures in testdata/ are real pages fetched by fixtures_refresh_test.go;
+// manifest.json records what was fetched. Negative cases are derived from
+// those real pages in code, never hand-written.
+
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/jooservices/go-jabledownloader/internal/domain"
 	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
-// fileFetcher serves fixture HTML from testdata/.
-type fileFetcher struct {
-	file string
+type manifest struct {
+	ListCount int    `json:"list_count"`
+	VideoURL  string `json:"video_url"`
+	VideoCode string `json:"video_code"`
 }
 
-func (f *fileFetcher) FetchHTML(_ context.Context, _ string, _ site.FetchMode) (string, error) {
-	data, err := os.ReadFile(filepath.Join("testdata", f.file))
-	if err != nil {
-		return "", err
+func loadManifest(t *testing.T) manifest {
+	t.Helper()
+	var m manifest
+	if err := json.Unmarshal([]byte(readFixture(t, "manifest.json")), &m); err != nil {
+		t.Fatal(err)
 	}
-	return string(data), nil
+	return m
 }
 
-// recordingFetcher serves fixture HTML and records the last requested URL.
-type recordingFetcher struct {
-	file string
+func readFixture(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// pageFetcher serves fixed HTML and records the requested URL and mode.
+type pageFetcher struct {
+	html string
+	err  error
 	url  string
+	mode site.FetchMode
+	ua   string
 }
 
-func (f *recordingFetcher) FetchHTML(_ context.Context, url string, _ site.FetchMode) (string, error) {
-	f.url = url
-	data, err := os.ReadFile(filepath.Join("testdata", f.file))
+func (f *pageFetcher) FetchHTML(_ context.Context, url string, mode site.FetchMode) (string, error) {
+	f.url, f.mode = url, mode
+	return f.html, f.err
+}
+
+// browserLikeFetcher also exposes a User-Agent, like *Browser.
+type browserLikeFetcher struct{ pageFetcher }
+
+func (f *browserLikeFetcher) UserAgent() string { return f.ua }
+
+func TestDetailParsesRealVideoPage(t *testing.T) {
+	m := loadManifest(t)
+	fetcher := &pageFetcher{html: readFixture(t, "video_page.html")}
+
+	info, err := NewClient(fetcher).Detail(context.Background(), m.VideoURL)
+
 	if err != nil {
-		return "", err
+		t.Fatalf("Detail: %v", err)
 	}
-	return string(data), nil
+	if info.Site != "jable" || info.Code != m.VideoCode || info.Title == "" || strings.Contains(info.Title, "Jable.TV") {
+		t.Fatalf("detail = %+v", info)
+	}
+	if info.VideoID == "" || len(info.Sources) != 1 {
+		t.Fatalf("detail = %+v", info)
+	}
+	src := info.Sources[0]
+	if src.Kind != domain.SourceHLS || !strings.HasSuffix(src.URL, ".m3u8") || src.Headers.Get("Referer") != BaseURL+"/" {
+		t.Fatalf("source = %+v", src)
+	}
+	if fetcher.url != m.VideoURL || fetcher.mode != site.FetchHLS {
+		t.Fatalf("fetched %q mode %v", fetcher.url, fetcher.mode)
+	}
 }
 
-type errFetcher struct{}
+func TestDetailBareCodeBuildsVideoURL(t *testing.T) {
+	m := loadManifest(t)
+	fetcher := &pageFetcher{html: readFixture(t, "video_page.html")}
 
-func (errFetcher) FetchHTML(context.Context, string, site.FetchMode) (string, error) {
-	return "", fmt.Errorf("boom")
+	if _, err := NewClient(fetcher).Detail(context.Background(), m.VideoCode); err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.url != BaseURL+"/videos/"+m.VideoCode+"/" {
+		t.Fatalf("requested %q", fetcher.url)
+	}
 }
 
-func TestFetchVideoInfo(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "video_page.html"})
+func TestDetailReusesBrowserUserAgentForMedia(t *testing.T) {
+	m := loadManifest(t)
+	fetcher := &browserLikeFetcher{pageFetcher{html: readFixture(t, "video_page.html"), ua: "Mozilla/5.0 Chrome/140.0"}}
 
-	info, err := c.FetchInfo(context.Background(), "https://en.jable.tv/videos/pred-840/")
+	info, err := NewClient(fetcher).Detail(context.Background(), m.VideoCode)
+
+	if err != nil || info.Sources[0].Headers.Get("User-Agent") != "Mozilla/5.0 Chrome/140.0" {
+		t.Fatalf("info=%+v err=%v", info, err)
+	}
+}
+
+var canonicalRe = regexp.MustCompile(`<link rel="canonical" href="[^"]*"`)
+
+// The page is untrusted and its code becomes a directory name: a hostile
+// canonical link (derived from the real page) must not override it.
+func TestDetailIgnoresUnsafeCanonicalCode(t *testing.T) {
+	m := loadManifest(t)
+	page := readFixture(t, "video_page.html")
+	for name, html := range map[string]string{
+		"traversal": canonicalRe.ReplaceAllString(page, `<link rel="canonical" href="https://en.jable.tv/videos/../"`),
+		"missing":   canonicalRe.ReplaceAllString(page, ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(page, `rel="canonical"`) {
+				t.Skip("real page has no canonical link")
+			}
+			info, err := NewClient(&pageFetcher{html: html}).Detail(context.Background(), m.VideoCode)
+			if err != nil || info.Code != m.VideoCode {
+				t.Fatalf("info=%+v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestDetailErrors(t *testing.T) {
+	if _, err := NewClient(&pageFetcher{err: errors.New("boom")}).Detail(context.Background(), "jur-827"); err == nil {
+		t.Fatal("expected fetch error")
+	}
+	if _, err := NewClient(&pageFetcher{html: readFixture(t, "browse_page.html")}).Detail(context.Background(), "jur-827"); err == nil {
+		t.Fatal("expected missing HLS error on a listing page")
+	}
+	if _, err := NewClient(&pageFetcher{}).Detail(context.Background(), "not a code"); err == nil {
+		t.Fatal("expected invalid input error")
+	}
+}
+
+func TestListParsesRealListing(t *testing.T) {
+	m := loadManifest(t)
+	fetcher := &pageFetcher{html: readFixture(t, "browse_page.html")}
+
+	items, err := NewClient(fetcher).List(context.Background(), site.ListOptions{})
+
 	if err != nil {
-		t.Fatalf("FetchInfo: %v", err)
+		t.Fatal(err)
 	}
-	if info.Code != "pred-840" {
-		t.Fatalf("expected code pred-840, got %q", info.Code)
+	if len(items) != m.ListCount || items[0].Code != m.VideoCode || items[0].URL != m.VideoURL {
+		t.Fatalf("items = %d, first = %+v", len(items), items[0])
 	}
-	if info.Title != "PRED-840 First Sample Title" {
-		t.Fatalf("unexpected title: %q", info.Title)
+	seen := map[string]bool{}
+	for _, item := range items {
+		if item.Site != "jable" || !codeRe.MatchString(item.Code) || item.Title == "" || seen[item.Code] {
+			t.Fatalf("bad item %+v", item)
+		}
+		seen[item.Code] = true
 	}
-	if len(info.Sources) != 1 || info.Sources[0].Kind != site.SourceHLS {
-		t.Fatalf("expected one HLS source, got %+v", info.Sources)
-	}
-	if info.Sources[0].URL != "https://stream.jable.tv/m3u8/422608.m3u8" {
-		t.Fatalf("unexpected hls url: %q", info.Sources[0].URL)
-	}
-	if info.VideoID != "422608" {
-		t.Fatalf("unexpected video id: %q", info.VideoID)
+	if fetcher.url != BaseURL+"/latest-updates/?page=1" || fetcher.mode != site.FetchReady {
+		t.Fatalf("fetched %q mode %v", fetcher.url, fetcher.mode)
 	}
 }
 
-func TestFetchVideoInfoCodeFromURLFallback(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "video_page_no_id.html"})
-
-	info, err := c.FetchInfo(context.Background(), "https://en.jable.tv/videos/dsod-001/")
-	if err != nil {
-		t.Fatalf("FetchInfo: %v", err)
-	}
-	if info.Code != "dsod-001" {
-		t.Fatalf("expected code dsod-001, got %q", info.Code)
-	}
-	if info.VideoID != "" {
-		t.Fatalf("expected empty video id, got %q", info.VideoID)
-	}
-	if len(info.Sources) != 1 || info.Sources[0].URL != "https://stream.jable.tv/m3u8/900001.m3u8" {
-		t.Fatalf("unexpected sources: %+v", info.Sources)
-	}
-}
-
-func TestBrowseEntries(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "browse_page.html"})
-
-	entries, err := c.Latest(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("Latest: %v", err)
-	}
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 deduped entries, got %d", len(entries))
-	}
-	if entries[0].Code != "jur-001" || entries[0].Title != "JUR-001 First Entry" {
-		t.Fatalf("unexpected first entry: %+v", entries[0])
-	}
-	if entries[0].URL != "https://en.jable.tv/videos/jur-001/" {
-		t.Fatalf("unexpected first url: %q", entries[0].URL)
-	}
-	if entries[1].Duration != "10:00" {
-		t.Fatalf("unexpected duration: %q", entries[1].Duration)
+func TestListAndSearchURLs(t *testing.T) {
+	html := readFixture(t, "browse_page.html")
+	for _, tc := range []struct {
+		name string
+		call func(*Client) error
+		want string
+	}{
+		{"hot", func(c *Client) error {
+			_, err := c.List(context.Background(), site.ListOptions{View: "hot", Page: 3})
+			return err
+		}, BaseURL + "/hot/?page=3"},
+		{"search", func(c *Client) error { _, err := c.Search(context.Background(), "cute girl", 2); return err },
+			BaseURL + "/search/cute%20girl/?page=2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher := &pageFetcher{html: html}
+			if err := tc.call(NewClient(fetcher)); err != nil || fetcher.url != tc.want {
+				t.Fatalf("url=%q err=%v", fetcher.url, err)
+			}
+		})
 	}
 }
 
-func TestHotVideos(t *testing.T) {
-	fetcher := &recordingFetcher{file: "browse_page.html"}
-	c := NewClient(fetcher)
-	entries, err := c.Hot(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("Hot: %v", err)
+func TestListAndSearchErrors(t *testing.T) {
+	c := NewClient(&pageFetcher{err: errors.New("boom")})
+	if _, err := c.List(context.Background(), site.ListOptions{View: "../admin"}); err == nil || !strings.Contains(err.Error(), "valid: latest, hot") {
+		t.Fatalf("view err = %v", err)
 	}
-	wantURL := BaseURL + "/hot/?page=1"
-	if fetcher.url != wantURL {
-		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
+	if _, err := c.List(context.Background(), site.ListOptions{}); err == nil {
+		t.Fatal("expected fetch error")
 	}
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(entries))
-	}
-}
-
-func TestBrowseFetcherError(t *testing.T) {
-	c := NewClient(errFetcher{})
-	if _, err := c.Latest(context.Background(), 1); err == nil {
-		t.Fatal("expected error")
-	}
-	if _, err := c.Search(context.Background(), "q", 1); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestSearchVideos(t *testing.T) {
-	fetcher := &recordingFetcher{file: "browse_page.html"}
-	c := NewClient(fetcher)
-	entries, err := c.Search(context.Background(), "jur", 1)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	wantURL := BaseURL + "/search/jur/?page=1"
-	if fetcher.url != wantURL {
-		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
-	}
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(entries))
-	}
-}
-
-func TestSearchVideosPathEscapesQuery(t *testing.T) {
-	fetcher := &recordingFetcher{file: "browse_page.html"}
-	c := NewClient(fetcher)
-	if _, err := c.Search(context.Background(), "cute girl", 2); err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	wantURL := BaseURL + "/search/cute%20girl/?page=2"
-	if fetcher.url != wantURL {
-		t.Fatalf("requested URL=%q want %q", fetcher.url, wantURL)
-	}
-}
-
-func TestFetchVideoInfoFetcherError(t *testing.T) {
-	c := NewClient(errFetcher{})
-	_, err := c.FetchInfo(context.Background(), "https://en.jable.tv/videos/x/")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestFetchVideoInfoMissingHLS(t *testing.T) {
-	c := NewClient(&fileFetcher{file: "browse_page.html"})
-	_, err := c.FetchInfo(context.Background(), "https://en.jable.tv/videos/jur-001/")
-	if err == nil {
-		t.Fatal("expected missing HLS error")
+	if _, err := c.Search(context.Background(), " ", 1); err == nil {
+		t.Fatal("expected empty keyword error")
 	}
 }
 
 func TestResolveInput(t *testing.T) {
 	cases := []struct {
-		in      string
-		want    string
-		wantErr bool
+		in, wantURL, wantCode string
+		wantErr               bool
 	}{
-		{"jur-827", "https://en.jable.tv/videos/jur-827/", false},
-		{"https://en.jable.tv/videos/jur-827/", "https://en.jable.tv/videos/jur-827/", false},
-		{"not a code", "", true},
-		{"https://www.eporner.com/video-abc123/x/", "", true},
+		{"jur-827", "https://en.jable.tv/videos/jur-827/", "jur-827", false},
+		{"https://en.jable.tv/videos/jur-827/", "https://en.jable.tv/videos/jur-827/", "jur-827", false},
+		{"not a code", "", "", true},
+		{"https://www.eporner.com/video-abc123/x/", "", "", true},
 	}
 	for _, tc := range cases {
-		got, err := ResolveInput(tc.in)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("ResolveInput(%q): expected error", tc.in)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("ResolveInput(%q): %v", tc.in, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("ResolveInput(%q) = %q, want %q", tc.in, got, tc.want)
+		gotURL, gotCode, err := resolveInput(tc.in)
+		if (err != nil) != tc.wantErr || gotURL != tc.wantURL || gotCode != tc.wantCode {
+			t.Errorf("resolveInput(%q) = %q, %q, %v", tc.in, gotURL, gotCode, err)
 		}
 	}
+	for in, want := range map[string]string{
+		"https://en.jable.tv/videos/jur-827/":     "jur-827",
+		"https://example.com/videos/pred-840/":    "",
+		"https://en.jable.tv/videos/not-a-code/":  "",
+		"https://jable.tv.evil.test/videos/a-1/":  "",
+		"https://en.jable.tv/videos/%zz/":         "",
+		"https://en.jable.tv/categories/jur-827/": "",
+	} {
+		if got := CodeFromURL(in); got != want {
+			t.Errorf("CodeFromURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
 
-	if got := CodeFromURL("https://en.jable.tv/videos/jur-827/"); got != "jur-827" {
-		t.Fatalf("CodeFromURL = %q", got)
+// Both pages are real: the interstitial served to a plain HTTP client and a
+// rendered page after Cloudflare cleared.
+func TestIsChallenge(t *testing.T) {
+	for file, want := range map[string]bool{
+		"cf_challenge.html": true,
+		"video_page.html":   false,
+		"browse_page.html":  false,
+	} {
+		if got := isChallenge(readFixture(t, file)); got != want {
+			t.Errorf("isChallenge(%s) = %v, want %v", file, got, want)
+		}
 	}
-	if got := CodeFromURL("https://example.com/videos/pred-840/"); got != "" {
-		t.Fatalf("CodeFromURL foreign host want empty, got %q", got)
+}
+
+func TestLaunchPlan(t *testing.T) {
+	for env, want := range map[string]string{"": "[false true]", "1": "[true]", "0": "[false]", " 1 ": "[true]"} {
+		if got := fmt.Sprint(launchPlan(env)); got != want {
+			t.Errorf("launchPlan(%q) = %s, want %s", env, got, want)
+		}
 	}
-	if got := CodeFromURL("https://en.jable.tv/videos/not-a-code/"); got != "" {
-		t.Fatalf("CodeFromURL bad code want empty, got %q", got)
+}
+
+func TestAllocatorOptionsAddsOptionalFlags(t *testing.T) {
+	base := len(allocatorOptions(false, "", ""))
+	if got := len(allocatorOptions(true, "/chrome", "/profile")); got != base+3 {
+		t.Fatalf("options = %d, want %d", got, base+3)
+	}
+}
+
+func TestUserAgentFrom(t *testing.T) {
+	got := userAgentFrom("Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.7339.80 Safari/537.36")
+	if got != "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.80 Safari/537.36" {
+		t.Fatal(got)
+	}
+}
+
+func TestPoll(t *testing.T) {
+	calls := 0
+	err := poll(context.Background(), time.Second, time.Millisecond, func() (bool, error) {
+		calls++
+		if calls == 1 {
+			return false, errors.New("navigating")
+		}
+		return calls == 3, nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	if err := poll(context.Background(), 20*time.Millisecond, time.Millisecond, func() (bool, error) { return false, nil }); !errors.Is(err, errPollTimeout) {
+		t.Fatalf("timeout err = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := poll(ctx, time.Second, time.Millisecond, func() (bool, error) { return false, nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel err = %v", err)
 	}
 }
