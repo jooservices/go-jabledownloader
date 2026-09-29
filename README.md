@@ -33,25 +33,39 @@ export to the JOOservices OpenObserve platform.
 
 ## Features
 
-- Multi-site with auto-detection: `get` resolves the provider from the URL
+- Multi-site with auto-detection: `download` resolves the provider from the URL
   (or Jable code); no `--site` flag
-- Photo galleries: `get` on a Jav Photos gallery URL downloads every photo at
-  its largest resolution (`/free/<slug>` → full-res `/pictures/` set)
+- Photo galleries: `download` on a Jav Photos gallery URL saves every photo at
+  its largest resolution into `<out>/javphotos/<gallery>/`; re-runs skip
+  photos already saved
 - EPORNER: direct MP4 download (240p–1080p, h264/av1) over parallel Range
   chunks with resume; no browser required
-- `get` a single video by URL or code (e.g. `jur-827`); skips existing files unless `--force`
-- `search`, `latest`, `hot` with an interactive multi-select picker and `--count`
+- `download` a single video by URL or code (e.g. `jur-827`); skips existing files unless `--force`
+- `get` to inspect a video (source URLs, or `--json` full detail) without downloading
+- Uniform site contract: every provider implements `List`, `Search`, and
+  `Detail`; listing rows include site, code, title, URL, thumbnail, and duration
+- `latest` aggregates the latest rows from every registered site; `search <keyword>`
+  searches every registered site by the supplied keyword
+- `site <name> list` and `site <name> search <keyword>` scope discovery to one
+  provider; pass `--view` for a provider-specific listing such as Jable `hot`
+- In an interactive terminal, discovery shows progress, prints the result rows,
+  and opens the multi-select picker so selected rows can be downloaded through
+  the normal download pipeline. Piped/JSON output remains display-only unless
+  `--download` is passed explicitly.
 - Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
 - `--quality` to cap height (`best`, `240`, `360`, `480`, `720`, `1080`)
-- `--subtitle` — English subtitles via host `mlx_whisper` (`--task translate`)
-- `--subtitle-mode soft|hard` — soft = separate track + `.en.srt`; hard = burn-in
+- `--subtitle` — subtitles via host `mlx_whisper`; English by default
+  (Whisper translates directly), other languages via `--subtitle-lang` + `--translator`
+- `--subtitle-mode soft|hard` — soft = separate track + `.<lang>.srt`; hard = burn-in
 - `--dry-run` preview with size estimates
-- `config` to persist `output_dir` / `worker_count`
+- Videos are saved to `<out>/<site>/<code>/`; customise with `--path-template`
+  (see [Output layout](#output-layout))
+- `config` to persist `output_dir` / `path_template` / `worker_count`
 - Self-update from GitHub releases
 
 ## Requirements
 
-- ffmpeg (Jable HLS concat/fallback; also audio extract + subtitle embed when `--subtitle`)
+- ffmpeg (HLS concat/remux; also audio extract + subtitle embed when `--subtitle`)
 - Chrome/Chromium (Jable scraping only — bypasses Cloudflare). EPORNER and
   other server-rendered sites need no browser
 - **Optional (host, `--subtitle` only):** [`mlx-whisper`](https://pypi.org/project/mlx-whisper/) on PATH
@@ -78,7 +92,7 @@ macOS example (Linux archives contain the same `jabledownloader` binary;
 Windows archives contain `jabledownloader.exe`):
 
 ```bash
-tar -xzf jabledownloader_v4.3.0_darwin_arm64.tar.gz
+tar -xzf jabledownloader_v4.4.0_darwin_arm64.tar.gz
 sudo mv jabledownloader /usr/local/bin/
 ```
 
@@ -91,29 +105,74 @@ make build   # host binary into bin/jabledownloader
 ## Quick start
 
 ```bash
+jabledownloader download jur-827
+jabledownloader download https://en.jable.tv/videos/abf-382/ --subtitle
+jabledownloader download abf-382 --subtitle --subtitle-mode hard
+jabledownloader download https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/ --quality 720
 jabledownloader get jur-827
-jabledownloader get https://en.jable.tv/videos/abf-382/ --subtitle
-jabledownloader get abf-382 --subtitle --subtitle-mode hard
-jabledownloader get https://www.eporner.com/video-1XrYk0gaMpV/daisy-f-x/ --quality 720
-jabledownloader get https://jav.photos/free/caribbeancom-ai-uehara-elite-3xpl
-jabledownloader search cute --dry-run
+jabledownloader download https://jav.photos/free/1pondo-chika-momoi-autumn-fakingstv
 jabledownloader latest --count 5
+jabledownloader search "cute" --site jable --count 5
+jabledownloader site jable list --view hot --count 5
+jabledownloader site eporner search "sample words" --count 5
 ```
 
-English subtitles (`--subtitle`) run on the **host** after the MP4 is ready:
-`ffmpeg` extracts audio → `mlx_whisper --task translate` (default model
-`mlx-community/whisper-medium`, spoken language `ja`) → `.en.srt`, then either
-**soft** mux (`mov_text`, language `eng`; default) or **hard** burn-in (pixels;
-needs ffmpeg with libass).
+Subtitles (`--subtitle`) run on the **host** after the MP4 is ready, as a
+pipeline of replaceable steps:
+
+1. **Extract audio** — `ffmpeg` (16 kHz mono WAV).
+2. **Transcribe** — `mlx_whisper` (default model `mlx-community/whisper-medium`,
+   spoken language `--spoken-language`, default `ja`).
+3. **Translate** — with the default `--translator auto` and `--subtitle-lang en`,
+   Whisper translates directly (`--task translate`). For any other language,
+   Whisper transcribes and the named `--translator` translates.
+4. **Apply** — **soft** mux (`mov_text` track; default) or **hard** burn-in
+   (needs ffmpeg with libass). The sidecar `<video>.<lang>.srt` marks success;
+   re-runs skip (hard subtitles are never burned twice).
+
+```bash
+jabledownloader download abf-382 --subtitle                       # English
+jabledownloader download abf-382 --subtitle --subtitle-lang vi --translator <name>
+```
+
+### Adding a translator
+
+Translators plug into a registry; the pipeline and the `--translator` flag
+pick them up without other changes:
+
+1. Create `internal/media/translate/<name>/` implementing `translate.Translator`
+   (keep cue count and timings; honour `ctx`; return
+   `translate.ErrUnsupportedPair` for pairs it cannot handle).
+2. Call `translate.Register("<name>", factory)` in its `init`.
+3. Blank-import the package in `cmd/jabledownloader/wiring.go`.
+4. Run the shared suite in its tests: `contracttest.Run(t, factory)`.
+
+### Output layout
+
+Each video gets its own directory under `--out` (default `./videos`), built
+from `--path-template` / `config set path_template` (default `{site}/{code}`):
+
+| Template | Result |
+| --- | --- |
+| `{site}/{code}` (default) | `videos/jable/abc-123/abc-123-h264.mp4` |
+| `{code}` | `videos/abc-123/…` (the pre-v5 layout) |
+| `library/{site}-{code}` | `videos/library/jable-abc-123/…` |
+
+The template must contain `{code}` and stay inside `--out`. Videos already in
+the pre-v5 `<out>/<code>/` layout are still recognised as downloaded.
 
 ## CLI / commands
 
 | Command | Purpose |
 | --- | --- |
-| `jabledownloader get <url\|code>` | Download a single video (site auto-detected from the input) |
-| `jabledownloader search <query>` | Search and download Jable videos (`--count`) |
-| `jabledownloader latest` | Download the latest Jable videos (`--count`) |
-| `jabledownloader hot` | Download the trending Jable videos (`--count`) |
+| `jabledownloader download <url\|code>` | Download a single video (site auto-detected from the input) |
+| `jabledownloader download <url\|code> --name <file>` | Download with a custom output filename |
+| `jabledownloader get <url\|code>` | Show video info (source URLs, or `--json` full detail) without downloading |
+| `jabledownloader latest` | Display latest rows from every site (`--site`, `--page`, `--count`, `--json`) |
+| `jabledownloader search <keyword>` | Search every site by keyword (`--site`, `--page`, `--count`, `--json`) |
+| `jabledownloader site <name> list` | Display one site's listing (`--view`, `--page`, `--count`, `--json`) |
+| `jabledownloader site <name> search <keyword>` | Search one site by keyword (`--page`, `--count`, `--json`) |
+| `… --download` | Explicitly select and download discovered rows; all discovery commands are display-only otherwise |
 | `jabledownloader update` | Self-update from GitHub releases (`--check`) |
 | `jabledownloader config` | Show or set persisted settings |
 | `jabledownloader completion <shell>` | Shell completion for bash/zsh/fish/powershell |
@@ -126,7 +185,9 @@ Persisted settings live in `~/.config/jabledownloader/config.json`
 | Env var | Purpose |
 | --- | --- |
 | `CHROME_PATH` | Chromium/Chrome binary for scraping (Docker sets `/usr/bin/chromium`) |
-| `OBS_ENDPOINT` | OpenObserve URL; unset = telemetry disabled (default) |
+| `CHROME_NO_SANDBOX` | `1` forces Chrome's `--no-sandbox`; `0` forbids the automatic fallback. Unset: sandbox on, retried without it only if Chrome cannot start (as root, e.g. in Docker, chromedp disables it automatically) |
+| `JABLE_CHROME_PROFILE` | Optional Chrome profile directory; keeps the Cloudflare clearance cookie between runs |
+| `OBS_ENDPOINT` | OpenObserve URL; unset = telemetry disabled (default). Credentials require `https` unless the host is loopback |
 | `OBS_ORG` | OBS organization (default `jooservices`) |
 | `OBS_STREAM` | OBS stream (default `jabledownloader`) |
 | `OBS_USER` | OBS ingestion user email |
@@ -147,15 +208,31 @@ variables above, and inspect at `http://localhost:5080` (stream
 
 Project rules live in [AGENTS.md](AGENTS.md). Key user-facing invariants:
 
-- Exit codes: `0` success, `1` error, `2` partial batch failure
+- Exit codes: `0` success, `1` error, `2` partial batch or multi-site discovery
+  failure, `130` interrupted (re-run the same command to resume)
 - Output naming: `<code>-<codec>.mp4` (codec from master playlist or the MP4
-  source, h264 fallback); `--subtitle` also writes `<code>-<codec>.en.srt`
-- Layered `internal/` packages: `internal/site` (provider abstraction +
-  auto-detect registry, `site/jable`, `site/eporner`, `site/javphotos`),
-  `internal/hls` and `internal/direct` are pure engines (no UI/config/telemetry
-  dependencies); engine and site tests use fixture data and never launch Chrome
-- The site is auto-detected from the input; Jable additionally needs a
-  browser, EPORNER and Jav Photos do not
+  source, h264 fallback); `--subtitle` also writes `<code>-<codec>.<lang>.srt`
+- `get --json` keeps the v4.3 JSON keys
+- Layered packages (enforced by `internal/archtest`):
+
+  ```
+  cmd/jabledownloader   composition root: flags, wiring, exit codes
+  internal/ui/cli       terminal UI: renders app events, picker, prompts
+  internal/app          use-cases; talks to UIs only via Reporter/Prompter
+  internal/site/*       sites resolve pages into domain values (jable, eporner, javphotos)
+  internal/engine/*     transport engines by source kind (hls, progressive)
+  internal/media/*      subtitle pipeline: audio → asr → translate → subtitle
+  internal/domain       shared values and events
+  internal/platform/*   HTTP clients shared by sites and engines
+  ```
+
+  Adding a site means one package under `internal/site/` plus a blank import
+  in `cmd`; engines are reused. Site test fixtures are real pages captured by
+  `go test -tags fixtures ./internal/site/...`, never hand-written.
+- The site is auto-detected from a video input; discovery may address all sites
+  or one named provider. Jable additionally needs a browser; EPORNER and Jav
+  Photos do not. Jable views: `latest`, `hot`; EPORNER views: `latest`, `all`,
+  `most-viewed`, `top-rated`; Jav Photos: `latest`.
 
 ## Documentation
 
@@ -171,10 +248,16 @@ Go 1.26 image); host Go is OK when it matches `go 1.26`.
 
 ```bash
 tools/install-git-hooks   # once after clone (commit-msg, pre-commit, pre-push)
-make docker-test          # fmt + vet + lint + test in the CI container
+make docker-test          # fmt + vet + lint + unit/coverage in the CI container
+make test-browser         # real-Chrome browser tests (e2e tag), merges coverage
 make docker-run           # run the image (ARGS="get jur-827")
 make release              # cross-compiled archives into dist/
 ```
+
+`make test` writes `coverage.out` and fails below **85% total statement
+coverage**. The Playwright E2E suite uses a local Jable-shaped fixture: it
+checks rendered DOM, then drives the production Chromium fetcher through
+listing parsing and HLS-detail extraction. It never calls third-party sites.
 
 ## Community
 

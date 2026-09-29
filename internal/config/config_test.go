@@ -16,6 +16,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.OutputDir != "./videos" {
 		t.Fatalf("unexpected output dir: %q", cfg.OutputDir)
 	}
+	if cfg.PathTemplate != "{site}/{code}" {
+		t.Fatalf("unexpected path template: %q", cfg.PathTemplate)
+	}
 }
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -37,7 +40,7 @@ func TestLoadExistingFile(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := json.Marshal(Config{OutputDir: "/tmp/videos", WorkerCount: 4})
+	data, _ := json.Marshal(Config{OutputDir: "/tmp/videos", PathTemplate: "archive/{code}", WorkerCount: 4})
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +54,9 @@ func TestLoadExistingFile(t *testing.T) {
 	}
 	if cfg.WorkerCount != 4 {
 		t.Fatalf("unexpected worker count: %d", cfg.WorkerCount)
+	}
+	if cfg.PathTemplate != "archive/{code}" {
+		t.Fatalf("unexpected path template: %q", cfg.PathTemplate)
 	}
 }
 
@@ -66,6 +72,7 @@ func TestSaveAndReload(t *testing.T) {
 
 	cfg := Defaults()
 	cfg.OutputDir = "/tmp/save-test"
+	cfg.PathTemplate = "saved/{site}/{code}"
 	cfg.WorkerCount = 8
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -75,7 +82,7 @@ func TestSaveAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if reloaded.OutputDir != "/tmp/save-test" || reloaded.WorkerCount != 8 {
+	if reloaded.OutputDir != "/tmp/save-test" || reloaded.PathTemplate != "saved/{site}/{code}" || reloaded.WorkerCount != 8 {
 		t.Fatalf("round-trip mismatch: %+v", reloaded)
 	}
 }
