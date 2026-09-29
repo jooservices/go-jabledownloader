@@ -246,3 +246,23 @@ func TestPickerLabelWithoutTitle(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestReporterRendersGallery(t *testing.T) {
+	events := []app.Event{
+		app.GalleryResolved{Site: "javphotos", Code: "set-1", Title: "Set One", Dir: "/out/javphotos/set-1", Photos: 2},
+		app.PhotoSaved{Index: 1, Total: 2, Path: "/out/javphotos/set-1/001-a.jpg", Size: 2048},
+		app.PhotoSaved{Index: 2, Total: 2, Path: "/out/javphotos/set-1/002-b.jpg", Skipped: true},
+		app.GalleryDownloaded{Code: "set-1", Dir: "/out/javphotos/set-1", Saved: 1, Skipped: 1, Size: 2048},
+	}
+	got := render(ReporterOptions{}, events...)
+	for _, want := range []string{"Gallery: set-1", "Photos:  2", "[1/2]", "001-a.jpg", "2.0 KiB", "002-b.jpg (already saved)",
+		"Gallery saved: /out/javphotos/set-1", "1 saved · 1 already saved · 0 failed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	quiet := render(ReporterOptions{Quiet: true}, events...)
+	if strings.Contains(quiet, "[1/2]") || !strings.Contains(quiet, "Gallery saved") {
+		t.Fatalf("quiet output = %q", quiet)
+	}
+}

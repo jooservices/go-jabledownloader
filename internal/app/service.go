@@ -167,11 +167,15 @@ func (s *Service) RunItems(ctx context.Context, items []domain.Item) error {
 	return nil
 }
 
-// get resolves and downloads one video, then applies subtitles if asked.
+// get resolves and downloads one video (or a photo gallery on gallery
+// sites), then applies subtitles if asked.
 func (s *Service) get(ctx context.Context, input string) error {
 	st, err := s.Sites.For(input)
 	if err != nil {
 		return err
+	}
+	if gs, ok := st.(site.GallerySite); ok {
+		return s.getGallery(ctx, st.Name(), gs, input)
 	}
 	info, err := s.detail(ctx, st, input)
 	if err != nil {

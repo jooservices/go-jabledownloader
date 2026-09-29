@@ -43,6 +43,27 @@ type VideoDownloaded struct {
 	Size              int64
 }
 
+// GalleryResolved reports a photo gallery before its photos download.
+type GalleryResolved struct {
+	Site, Code, Title, Dir string
+	Photos                 int
+}
+
+// PhotoSaved reports one gallery photo; Skipped means it was already saved.
+type PhotoSaved struct {
+	Index, Total int
+	Path         string
+	Size         int64
+	Skipped      bool
+}
+
+// GalleryDownloaded summarizes a gallery download.
+type GalleryDownloaded struct {
+	Code, Dir              string
+	Saved, Skipped, Failed int
+	Size                   int64
+}
+
 // SubtitleStarted opens subtitle generation for a video.
 type SubtitleStarted struct{ Video string }
 
@@ -74,18 +95,21 @@ type ItemFailed struct {
 	Err  error
 }
 
-func (RunStarted) appEvent()       {}
-func (VideoResolved) appEvent()    {}
-func (DryRun) appEvent()           {}
-func (VideoSkipped) appEvent()     {}
-func (DownloadStarted) appEvent()  {}
-func (DownloadProgress) appEvent() {}
-func (DownloadStopped) appEvent()  {}
-func (VideoDownloaded) appEvent()  {}
-func (SubtitleStarted) appEvent()  {}
-func (SubtitleDone) appEvent()     {}
-func (DiscoveryStarted) appEvent() {}
-func (DiscoveryDone) appEvent()    {}
-func (PlanReady) appEvent()        {}
-func (Cancelled) appEvent()        {}
-func (ItemFailed) appEvent()       {}
+func (RunStarted) appEvent()        {}
+func (VideoResolved) appEvent()     {}
+func (DryRun) appEvent()            {}
+func (VideoSkipped) appEvent()      {}
+func (DownloadStarted) appEvent()   {}
+func (DownloadProgress) appEvent()  {}
+func (DownloadStopped) appEvent()   {}
+func (VideoDownloaded) appEvent()   {}
+func (GalleryResolved) appEvent()   {}
+func (PhotoSaved) appEvent()        {}
+func (GalleryDownloaded) appEvent() {}
+func (SubtitleStarted) appEvent()   {}
+func (SubtitleDone) appEvent()      {}
+func (DiscoveryStarted) appEvent()  {}
+func (DiscoveryDone) appEvent()     {}
+func (PlanReady) appEvent()         {}
+func (Cancelled) appEvent()         {}
+func (ItemFailed) appEvent()        {}

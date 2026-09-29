@@ -26,6 +26,7 @@ import (
 	_ "github.com/jooservices/go-jabledownloader/internal/engine/hls"
 	_ "github.com/jooservices/go-jabledownloader/internal/engine/progressive"
 	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
+	_ "github.com/jooservices/go-jabledownloader/internal/site/javphotos"
 )
 
 // deps are the process-level collaborators; tests replace them.

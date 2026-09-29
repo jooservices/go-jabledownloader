@@ -12,6 +12,9 @@ No unreleased changes.
 
 ### Added
 
+- Jav Photos (`jav.photos`) photo galleries: `download <gallery URL>` saves
+  every photo at its largest size into `<out>/javphotos/<gallery>/`; the site
+  also joins `latest`, `search`, and `site javphotos list/search`
 - Subtitle pipeline with replaceable steps (audio → transcribe → translate →
   apply) and a translator registry; `--subtitle-lang` and `--translator` flags.
   English still uses Whisper's direct translation by default
@@ -37,17 +40,16 @@ No unreleased changes.
 - Ctrl-C exits with code `130` and explains how to resume
 - `--verbose` streams Whisper progress to stderr
 
-### Tests
+### Removed
 
-- Added deterministic Playwright/Chromium E2E coverage for the production Jable
-  browser adapter, alongside network-free Go fixture tests
+- Playwright/Node E2E harness (it only served hand-written HTML); browser
+  tests run in Go against real captured pages via `make test-browser`
 
 ### Fixed
 
 - The video picker starts with nothing selected; confirming an empty
   selection downloads nothing
 - EPORNER listings showed "duration unknown" for every video
-
 - EPORNER downloads: the media client lost the redirect space-encoding and
   the desktop User-Agent
 - Media transfers could hang forever on a stalled connection (idle timeout)

@@ -32,6 +32,16 @@ type Site interface {
 	Detail(ctx context.Context, ref string) (*domain.Detail, error)
 }
 
+// GallerySite is the optional contract of photo-gallery providers (for
+// example Jav Photos): a gallery URL resolves to all of its photos, which
+// the app downloads instead of a video.
+type GallerySite interface {
+	Gallery(ctx context.Context, ref string) (*domain.Gallery, error)
+}
+
+// ErrNotVideo is returned by Detail on sites that only host photo galleries.
+var ErrNotVideo = errors.New("this site hosts photo galleries, not videos; use download with a gallery URL")
+
 // ErrUnsupportedInput is returned when no registered site can resolve input.
 var ErrUnsupportedInput = errors.New("unsupported input: provide a site URL or a recognized video code")
 

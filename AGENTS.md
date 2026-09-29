@@ -9,7 +9,9 @@ This file adds project-only rules.
   → `internal/domain`. Concrete sites, engines, and translators register
   themselves and are blank-imported only in `cmd`
 - Sites resolve only; downloading belongs to transport engines chosen by
-  `Source.Kind` (`engine/hls`, `engine/progressive`). CDN headers travel on
+  `Source.Kind` (`engine/hls`, `engine/progressive`). Photo-gallery sites
+  (Jav Photos) also implement `site.GallerySite`; their photos download one
+  file each through `engine/progressive`. CDN headers travel on
   `Source.Headers`; never hard-code a site URL or referer in an engine
 - Engines are pure: no `ui`, `config`, `telemetry`, `site`, or `media` imports;
   progress leaves via `domain.EventSink`. Prefer stdlib + `golang.org/x/sync`

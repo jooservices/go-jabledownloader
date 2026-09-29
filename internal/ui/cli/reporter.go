@@ -54,6 +54,10 @@ func (r *Reporter) Report(ev app.Event) {
 		r.verbosef("  %sCodec:%s   %s\n", ColorDim, ColorReset, e.Codec)
 	case app.ItemFailed:
 		r.w.Printf("  %s%s Download %s: %v%s\n", ColorRed, IconErr, e.Code, e.Err, ColorReset)
+	case app.GalleryDownloaded:
+		r.w.Printf("\n  %s%s Gallery saved: %s%s\n", ColorGreen, IconOk, e.Dir, ColorReset)
+		r.w.Printf("  %s%s %d saved · %d already saved · %d failed · %s%s\n",
+			ColorDim, IconDisk, e.Saved, e.Skipped, e.Failed, format.Bytes(e.Size), ColorReset)
 	default:
 		if !r.opts.Quiet {
 			r.reportDetail(ev)
@@ -76,6 +80,19 @@ func (r *Reporter) reportDetail(ev app.Event) {
 		r.w.Printf("  %sWorkers:%s %d\n", ColorDim, ColorReset, e.Workers)
 		r.verbosef("  %sInput:%s   %s\n", ColorDim, ColorReset, e.Input)
 		r.w.Println()
+	case app.GalleryResolved:
+		r.w.Printf("  %sTitle:%s   %s\n", ColorDim, ColorReset, e.Title)
+		r.w.Printf("  %sGallery:%s %s\n", ColorDim, ColorReset, e.Code)
+		r.w.Printf("  %sSite:%s    %s\n", ColorDim, ColorReset, e.Site)
+		r.w.Printf("  %sPhotos:%s  %d\n", ColorDim, ColorReset, e.Photos)
+		r.w.Printf("  %sOutput:%s  %s\n", ColorDim, ColorReset, e.Dir)
+		r.w.Println()
+	case app.PhotoSaved:
+		if e.Skipped {
+			r.w.Printf("  %s[%d/%d]%s %s%s %s (already saved)%s\n", ColorCyan, e.Index, e.Total, ColorReset, ColorYellow, IconSkip, filepath.Base(e.Path), ColorReset)
+		} else {
+			r.w.Printf("  %s[%d/%d]%s %s%s %s%s  %s\n", ColorCyan, e.Index, e.Total, ColorReset, ColorGreen, IconOk, filepath.Base(e.Path), ColorReset, format.Bytes(e.Size))
+		}
 	case app.DryRun:
 		r.w.Printf("  %s%s Dry run — nothing downloaded.%s\n", ColorYellow, IconSpark, ColorReset)
 	case app.Cancelled:

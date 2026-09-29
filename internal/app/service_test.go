@@ -27,13 +27,14 @@ type fakeWorld struct {
 	items     map[string][]domain.Item  // by site
 	listErr   map[string]error
 	listDelay time.Duration
+	galleries map[string]*domain.Gallery // by ref
 }
 
 var world = &fakeWorld{}
 
 func resetWorld(t *testing.T) *fakeWorld {
 	t.Helper()
-	world = &fakeWorld{details: map[string]*domain.Detail{}, items: map[string][]domain.Item{}, listErr: map[string]error{}}
+	world = &fakeWorld{details: map[string]*domain.Detail{}, items: map[string][]domain.Item{}, listErr: map[string]error{}, galleries: map[string]*domain.Gallery{}}
 	return world
 }
 
@@ -67,7 +68,24 @@ func (f fakeSite) Detail(_ context.Context, ref string) (*domain.Detail, error) 
 	return nil, fmt.Errorf("no such video %q", ref)
 }
 
+// fakeGallerySite hosts photo galleries only.
+type fakeGallerySite struct{ fakeSite }
+
+func (fakeGallerySite) Gallery(_ context.Context, ref string) (*domain.Gallery, error) {
+	world.mu.Lock()
+	defer world.mu.Unlock()
+	if g, ok := world.galleries[ref]; ok {
+		copied := *g
+		return &copied, nil
+	}
+	return nil, fmt.Errorf("no such gallery %q", ref)
+}
+
 func init() {
+	site.Register(site.Descriptor{
+		Name: "gamma", Hosts: []string{"gamma.test"},
+		New: func(site.Fetcher) site.Site { return fakeGallerySite{fakeSite{name: "gamma"}} },
+	})
 	for _, name := range []string{"alpha", "beta"} {
 		site.Register(site.Descriptor{
 			Name: name, Hosts: []string{name + ".test"}, CodeRe: regexp.MustCompile(`^` + name[:1] + `-\d+$`),
@@ -77,18 +95,24 @@ func init() {
 }
 
 type fakeEngine struct {
-	mu   sync.Mutex
-	reqs []engine.Request
-	err  error
+	mu      sync.Mutex
+	reqs    []engine.Request
+	err     error
+	failURL string // requests for this URL fail
 }
 
 func (e *fakeEngine) Download(_ context.Context, req engine.Request, sink domain.EventSink) (*engine.Result, error) {
 	e.mu.Lock()
 	e.reqs = append(e.reqs, req)
 	e.mu.Unlock()
-	sink(domain.Event{Kind: domain.EventProgress, Done: 1, Total: 1, Bytes: 5})
+	if sink != nil {
+		sink(domain.Event{Kind: domain.EventProgress, Done: 1, Total: 1, Bytes: 5})
+	}
 	if e.err != nil {
 		return nil, e.err
+	}
+	if req.Source.URL == e.failURL {
+		return nil, errors.New("http status 404")
 	}
 	path := filepath.Join(req.Dir, req.OutputName("h264"))
 	if err := os.MkdirAll(req.Dir, 0o755); err != nil {
@@ -412,7 +436,7 @@ func TestDiscoveryReportsFailuresAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := f.svc.List(context.Background(), "gamma", "latest", 1, 0); !errors.As(err, &discoveryErr) {
+	if _, err := f.svc.List(context.Background(), "zeta", "latest", 1, 0); !errors.As(err, &discoveryErr) {
 		t.Fatalf("unknown site err = %v", err)
 	}
 
@@ -592,7 +616,7 @@ func TestSitesBuildsBrowserLazilyOnce(t *testing.T) {
 	if _, err := NewSites(nil).build(d); err == nil {
 		t.Fatal("expected missing browser error")
 	}
-	if _, err := NewSites(nil).ByName("gamma"); err == nil {
+	if _, err := NewSites(nil).ByName("zeta"); err == nil {
 		t.Fatal("expected unknown site error")
 	}
 }
@@ -602,7 +626,7 @@ func TestEventTypesImplementEvent(_ *testing.T) {
 	for _, ev := range []Event{
 		RunStarted{}, VideoResolved{}, DryRun{}, VideoSkipped{}, DownloadStarted{}, DownloadProgress{},
 		DownloadStopped{}, VideoDownloaded{}, SubtitleStarted{}, SubtitleDone{}, DiscoveryStarted{},
-		DiscoveryDone{}, PlanReady{}, Cancelled{}, ItemFailed{},
+		DiscoveryDone{}, PlanReady{}, Cancelled{}, ItemFailed{}, GalleryResolved{}, PhotoSaved{}, GalleryDownloaded{},
 	} {
 		ev.appEvent()
 	}
@@ -614,5 +638,114 @@ func TestListUsesView(t *testing.T) {
 	result, err := f.svc.List(context.Background(), "alpha", "hot", 2, 0)
 	if err != nil || len(result.Items) != 1 || result.Items[0].Site != "alpha" {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func galleryFixture(t *testing.T) (fixture, *fakeEngine) {
+	t.Helper()
+	f := newFixture(t)
+	photos := &fakeEngine{}
+	engine.Register(domain.SourceProgressive, photos)
+	t.Cleanup(func() { engine.Register(domain.SourceProgressive, nil) })
+	f.world.galleries["https://gamma.test/g/1"] = &domain.Gallery{Site: "gamma", Code: "set-1", Title: "Set One", Photos: []domain.Photo{
+		{ID: "a-1", URL: "https://img.test/a-1.JPG", Headers: http.Header{"Referer": {"https://gamma.test/"}}},
+		{ID: "../evil", URL: "https://img.test/b.png"},
+		{ID: "c-3", URL: "https://img.test/c-3"},
+	}}
+	return f, photos
+}
+
+func TestGalleryDownloadsEveryPhoto(t *testing.T) {
+	f, photos := galleryFixture(t)
+
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/g/1"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(f.out, "gamma", "set-1")
+	var names []string
+	for _, req := range photos.requests() {
+		if req.Dir != dir || req.Workers != 1 {
+			t.Fatalf("request = %+v", req)
+		}
+		names = append(names, req.FileName)
+	}
+	if strings.Join(names, ",") != "001-a-1.jpg,002.png,003-c-3.jpg" {
+		t.Fatalf("file names = %v (unsafe ids must be dropped)", names)
+	}
+	if photos.requests()[0].Source.Headers.Get("Referer") != "https://gamma.test/" {
+		t.Fatal("photo headers not passed to the engine")
+	}
+	if len(f.engine.requests()) != 0 {
+		t.Fatal("gallery must not use the video engine")
+	}
+	resolved, _ := find[GalleryResolved](f.rec)
+	done, _ := find[GalleryDownloaded](f.rec)
+	if resolved.Photos != 3 || resolved.Title != "Set One" || done.Saved != 3 || done.Size != 15 || done.Dir != dir {
+		t.Fatalf("resolved=%+v done=%+v", resolved, done)
+	}
+}
+
+func TestGallerySkipsSavedPhotosAndReportsFailures(t *testing.T) {
+	f, photos := galleryFixture(t)
+	dir := filepath.Join(f.out, "gamma", "set-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "001-a-1.jpg"), []byte("saved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	photos.failURL = "https://img.test/b.png"
+
+	err := f.svc.RunGet(context.Background(), "https://gamma.test/g/1")
+
+	var planErr *PlanError
+	if !errors.As(err, &planErr) || planErr.Failed != 1 || len(photos.requests()) != 2 {
+		t.Fatalf("err=%v requests=%d", err, len(photos.requests()))
+	}
+	done, _ := find[GalleryDownloaded](f.rec)
+	if done.Saved != 1 || done.Skipped != 1 || done.Failed != 1 {
+		t.Fatalf("summary = %+v", done)
+	}
+	if failed, ok := find[ItemFailed](f.rec); !ok || failed.Code != "002.png" {
+		t.Fatalf("ItemFailed = %+v", failed)
+	}
+
+	f.svc.Opts.Force = true
+	photos.failURL = ""
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/g/1"); err != nil || len(photos.requests()) != 5 {
+		t.Fatalf("--force err=%v requests=%d", err, len(photos.requests()))
+	}
+}
+
+func TestGalleryDryRunAndErrors(t *testing.T) {
+	f, photos := galleryFixture(t)
+	f.svc.Opts.DryRun = true
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/g/1"); err != nil || len(photos.requests()) != 0 {
+		t.Fatalf("dry run err=%v requests=%d", err, len(photos.requests()))
+	}
+	f.svc.Opts.DryRun = false
+
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/missing"); err == nil || !strings.Contains(err.Error(), "fetch gallery") {
+		t.Fatalf("missing gallery err = %v", err)
+	}
+	f.world.galleries["https://gamma.test/bad"] = &domain.Gallery{Code: "..", Photos: []domain.Photo{{URL: "https://img.test/x.jpg"}}}
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/bad"); err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("unsafe code err = %v", err)
+	}
+
+	engine.Register(domain.SourceProgressive, nil)
+	if err := f.svc.RunGet(context.Background(), "https://gamma.test/g/1"); err == nil || !strings.Contains(err.Error(), "no engine") {
+		t.Fatalf("missing engine err = %v", err)
+	}
+}
+
+func TestGalleryCancellationStops(t *testing.T) {
+	f, photos := galleryFixture(t)
+	photos.err = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := f.svc.RunGet(ctx, "https://gamma.test/g/1"); !errors.Is(err, context.Canceled) || len(photos.requests()) != 1 {
+		t.Fatalf("err=%v requests=%d", err, len(photos.requests()))
 	}
 }
