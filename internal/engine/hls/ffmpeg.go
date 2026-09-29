@@ -27,11 +27,14 @@ const (
 	localProtocols  = "file,concat"
 )
 
-func requireFFmpeg() error {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return errors.New("ffmpeg is required to produce an mp4 — install it and ensure it is on PATH")
+// ffmpegPath resolves ffmpeg to an absolute path once per call site, so the
+// command runs that exact binary rather than a PATH lookup at exec time.
+func ffmpegPath() (string, error) {
+	path, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", errors.New("ffmpeg is required to produce an mp4 — install it and ensure it is on PATH")
 	}
-	return nil
+	return filepath.Abs(path)
 }
 
 // concat muxes n downloaded segments from segDir into out.
@@ -45,10 +48,11 @@ func concat(ctx context.Context, segDir string, n int, out string) error {
 		return fmt.Errorf("write concat list: %w", err)
 	}
 	defer os.Remove(listPath)
-	if err := requireFFmpeg(); err != nil {
+	ffmpeg, err := ffmpegPath()
+	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	cmd := exec.CommandContext(ctx, ffmpeg,
 		"-hide_banner", "-loglevel", "error",
 		"-protocol_whitelist", localProtocols,
 		"-f", "concat", "-safe", "0", "-i", listPath,
@@ -77,14 +81,15 @@ func concatList(segDir string, n int) (string, error) {
 // remux lets ffmpeg download and mux the media playlist directly, reporting
 // time-based progress parsed from `-progress pipe:1`.
 func remux(ctx context.Context, mediaURL string, headers http.Header, out string, sink domain.EventSink) error {
-	if err := requireFFmpeg(); err != nil {
+	ffmpeg, err := ffmpegPath()
+	if err != nil {
 		return err
 	}
 	args, err := remuxArgs(mediaURL, headers, out)
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
