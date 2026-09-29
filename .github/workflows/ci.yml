@@ -165,7 +165,7 @@ jobs:
         run: tools/ci/docker-compose run --rm go go mod download
 
       - name: Run tests with coverage
-        run: tools/ci/docker-compose run --rm go go test -race -coverprofile=coverage.out ./...
+        run: tools/ci/docker-compose run --rm go make test test-browser
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7

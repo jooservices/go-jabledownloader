@@ -1,4 +1,7 @@
-// Command jabledownloader downloads videos from Jable.TV.
+// Command jabledownloader discovers and downloads videos from supported
+// sites. This package is the composition root: it parses flags, wires the
+// concrete sites, engines, subtitle pipeline, and terminal UI into the app
+// use-cases, and maps errors to exit codes.
 package main
 
 import (
@@ -6,23 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
-	"strconv"
-	"strings"
-
-	"github.com/spf13/cobra"
+	"os/signal"
+	"syscall"
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
-	"github.com/jooservices/go-jabledownloader/internal/config"
-	"github.com/jooservices/go-jabledownloader/internal/site"
-	"github.com/jooservices/go-jabledownloader/internal/site/jable"
-	"github.com/jooservices/go-jabledownloader/internal/subtitle"
-	"github.com/jooservices/go-jabledownloader/internal/telemetry"
-	"github.com/jooservices/go-jabledownloader/internal/ui"
-	"github.com/jooservices/go-jabledownloader/internal/update"
-
-	// Register the EPORNER site (init-time registration).
-	_ "github.com/jooservices/go-jabledownloader/internal/site/eporner"
 )
 
 // version is stamped at build time via
@@ -30,489 +20,50 @@ import (
 //	go build -ldflags "-X main.version=v1.2.3"
 var version = "dev"
 
-var rootFlags struct {
-	outDir         string
-	workers        int
-	dryRun         bool
-	yes            bool
-	quiet          bool
-	noColor        bool
-	verbose        bool
-	force          bool
-	quality        string
-	subtitle       bool
-	subtitleMode   string
-	whisperModel   string
-	spokenLanguage string
-}
-
-var searchFlags struct {
-	count int
-}
-
-var latestFlags struct {
-	count int
-}
-
-var hotFlags struct {
-	count int
-}
-
-var updateFlags struct {
-	checkOnly bool
-}
-
 // Exit codes.
 const (
-	exitOK      = 0
-	exitError   = 1
-	exitPartial = 2
+	exitOK          = 0
+	exitError       = 1
+	exitPartial     = 2   // some videos or sites failed
+	exitInterrupted = 130 // SIGINT/SIGTERM, by shell convention
 )
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(os.Args[1:], productionDeps()))
 }
 
-func run() int {
-	ctx, cancel := app.SetupContext()
-	defer cancel()
+func run(args []string, d deps) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return execute(ctx, args, d)
+}
 
-	rootCmd := newRootCmd()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return exitCodeFor(err)
+func execute(ctx context.Context, args []string, d deps) int {
+	root := newRootCmd(d)
+	root.SetArgs(args)
+	err := root.ExecuteContext(ctx)
+	switch code := exitCodeFor(err); code {
+	case exitOK:
+	case exitInterrupted:
+		fmt.Fprintln(d.stderr, "Interrupted — finished parts are kept; re-run the same command to resume.")
+		return code
+	default:
+		fmt.Fprintf(d.stderr, "Error: %v\n", err)
+		return code
 	}
 	return exitOK
 }
 
 func exitCodeFor(err error) int {
-	var partial *app.PlanError
-	if errors.As(err, &partial) {
+	var plan *app.PlanError
+	var discovery *app.DiscoveryError
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, context.Canceled):
+		return exitInterrupted
+	case errors.As(err, &plan) || errors.As(err, &discovery):
 		return exitPartial
 	}
 	return exitError
-}
-
-func newRootCmd() *cobra.Command {
-	rootCmd := &cobra.Command{
-		Use:           "jabledownloader",
-		Short:         "Download videos from Jable.TV",
-		Version:       version,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-
-	rootCmd.PersistentFlags().StringVarP(&rootFlags.outDir, "out", "o", "", "Output directory (default: ./videos)")
-	rootCmd.PersistentFlags().IntVarP(&rootFlags.workers, "workers", "w", 0, "Number of concurrent workers (default: 16)")
-	rootCmd.PersistentFlags().BoolVar(&rootFlags.dryRun, "dry-run", false, "Preview what would be downloaded without downloading")
-	rootCmd.PersistentFlags().BoolVarP(&rootFlags.yes, "yes", "y", false, "Skip the interactive picker and confirmation prompts")
-	rootCmd.PersistentFlags().BoolVarP(&rootFlags.quiet, "quiet", "q", false, "Only print the final result")
-	rootCmd.PersistentFlags().BoolVar(&rootFlags.noColor, "no-color", false, "Disable ANSI colors")
-	rootCmd.PersistentFlags().BoolVarP(&rootFlags.verbose, "verbose", "v", false, "Verbose output (URLs, HLS links, codec)")
-	rootCmd.PersistentFlags().BoolVarP(&rootFlags.force, "force", "f", false, "Re-download even if the video file already exists")
-	rootCmd.PersistentFlags().StringVar(&rootFlags.quality, "quality", "best", "Max video height: best, 240, 360, 480, 720, 1080")
-	rootCmd.PersistentFlags().BoolVar(&rootFlags.subtitle, "subtitle", false, "Embed English subtitles via host mlx_whisper (translate)")
-	rootCmd.PersistentFlags().StringVar(&rootFlags.subtitleMode, "subtitle-mode", "soft", "Subtitle style: soft (separate track) or hard (burn-in)")
-	rootCmd.PersistentFlags().StringVar(&rootFlags.whisperModel, "whisper-model", "", "mlx_whisper model (default: mlx-community/whisper-medium)")
-	rootCmd.PersistentFlags().StringVar(&rootFlags.spokenLanguage, "spoken-language", "ja", "Spoken language hint for Whisper (empty = auto-detect)")
-
-	rootCmd.AddGroup(&cobra.Group{ID: "download", Title: "Download:"})
-	rootCmd.AddGroup(&cobra.Group{ID: "discovery", Title: "Discovery:"})
-	rootCmd.AddGroup(&cobra.Group{ID: "self", Title: "Self-management:"})
-
-	rootCmd.AddCommand(newGetCmd())
-	rootCmd.AddCommand(newSearchCmd())
-	rootCmd.AddCommand(newLatestCmd())
-	rootCmd.AddCommand(newHotCmd())
-	rootCmd.AddCommand(newUpdateCmd())
-	rootCmd.AddCommand(newConfigCmd())
-	rootCmd.AddCommand(newCompletionCmd(rootCmd))
-
-	return rootCmd
-}
-
-func newGetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "get <url|code>",
-		Short:   "Download a single video by URL or code",
-		GroupID: "download",
-		Args:    cobra.ExactArgs(1),
-		Example: "  jabledownloader get jur-827\n  jabledownloader get https://en.jable.tv/videos/jur-827/\n  jabledownloader get abf-382 --subtitle --subtitle-mode soft\n  jabledownloader get abf-382 --subtitle --subtitle-mode hard",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			svc, cleanup, err := newScrapeService(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			return svc.RunGet(cmd.Context(), args[0])
-		},
-	}
-}
-
-func newSearchCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "search <query>",
-		Short:   "Search and download videos",
-		GroupID: "discovery",
-		Args:    cobra.MinimumNArgs(1),
-		Example: "  jabledownloader search cute\n  jabledownloader search \"cute girl\" --count 5",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			svc, cleanup, err := newScrapeService(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			st, err := svc.Sites.Jable()
-			if err != nil {
-				return err
-			}
-			lister, ok := st.(site.Lister)
-			if !ok {
-				return fmt.Errorf("jable does not support listings")
-			}
-			query := strings.Join(args, " ")
-			return svc.RunMulti(cmd.Context(), "search: "+query, searchFlags.count, st,
-				func(ctx context.Context, page int) ([]site.VideoEntry, error) {
-					return lister.Search(ctx, query, page)
-				})
-		},
-	}
-	cmd.Flags().IntVarP(&searchFlags.count, "count", "n", 10, "Number of videos to download")
-	return cmd
-}
-
-func newLatestCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "latest",
-		Short:   "Download the latest videos",
-		GroupID: "discovery",
-		Example: "  jabledownloader latest --count 5",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, cleanup, err := newScrapeService(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			st, err := svc.Sites.Jable()
-			if err != nil {
-				return err
-			}
-			lister, ok := st.(site.Lister)
-			if !ok {
-				return fmt.Errorf("jable does not support listings")
-			}
-			return svc.RunMulti(cmd.Context(), "latest", latestFlags.count, st, lister.Latest)
-		},
-	}
-	cmd.Flags().IntVarP(&latestFlags.count, "count", "n", 10, "Number of videos to download")
-	return cmd
-}
-
-func newHotCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "hot",
-		Short:   "Download the hot/trending videos",
-		GroupID: "discovery",
-		Example: "  jabledownloader hot --count 5",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, cleanup, err := newScrapeService(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			st, err := svc.Sites.Jable()
-			if err != nil {
-				return err
-			}
-			lister, ok := st.(site.Lister)
-			if !ok {
-				return fmt.Errorf("jable does not support listings")
-			}
-			return svc.RunMulti(cmd.Context(), "hot", hotFlags.count, st, lister.Hot)
-		},
-	}
-	cmd.Flags().IntVarP(&hotFlags.count, "count", "n", 10, "Number of videos to download")
-	return cmd
-}
-
-func newUpdateCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "update",
-		Short:   "Check for updates and install the latest release",
-		GroupID: "self",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runUpdate(cmd.Context())
-		},
-	}
-	cmd.Flags().BoolVar(&updateFlags.checkOnly, "check", false, "Only check for a newer version, do not install")
-	return cmd
-}
-
-func newConfigCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "config",
-		Short:   "Show or change persisted CLI settings",
-		GroupID: "self",
-		Example: "  jabledownloader config\n  jabledownloader config set output_dir ~/Downloads/jable\n  jabledownloader config set worker_count 8",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runConfigShow(cmd)
-		},
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "get [key]",
-		Short: "Print the config file or one key",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return runConfigShow(cmd)
-			}
-			return runConfigGet(cmd, args[0])
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "set <key> <value>",
-		Short: "Persist a config value (output_dir or worker_count)",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigSet(cmd, args[0], args[1])
-		},
-	})
-	return cmd
-}
-
-func runConfigShow(cmd *cobra.Command) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "  Path:         %s\n", config.Path())
-	fmt.Fprintf(cmd.OutOrStdout(), "  output_dir:   %s\n", cfg.OutputDir)
-	fmt.Fprintf(cmd.OutOrStdout(), "  worker_count: %d\n", cfg.WorkerCount)
-	return nil
-}
-
-func runConfigGet(cmd *cobra.Command, key string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	switch strings.ToLower(key) {
-	case "output_dir":
-		fmt.Fprintln(cmd.OutOrStdout(), cfg.OutputDir)
-	case "worker_count":
-		fmt.Fprintln(cmd.OutOrStdout(), cfg.WorkerCount)
-	case "path":
-		fmt.Fprintln(cmd.OutOrStdout(), config.Path())
-	default:
-		return fmt.Errorf("unknown config key %q (supported: output_dir, worker_count, path)", key)
-	}
-	return nil
-}
-
-func runConfigSet(cmd *cobra.Command, key, value string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	switch strings.ToLower(key) {
-	case "output_dir":
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("output_dir must not be empty")
-		}
-		cfg.OutputDir = value
-	case "worker_count":
-		n, err := strconv.Atoi(value)
-		if err != nil || n <= 0 {
-			return fmt.Errorf("worker_count must be a positive integer")
-		}
-		cfg.WorkerCount = n
-	default:
-		return fmt.Errorf("unknown config key %q (supported: output_dir, worker_count)", key)
-	}
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "  Saved %s=%s to %s\n", key, value, config.Path())
-	return nil
-}
-
-func newCompletionCmd(root *cobra.Command) *cobra.Command {
-	return &cobra.Command{
-		Use:       "completion [bash|zsh|fish|powershell]",
-		Short:     "Generate shell completion script",
-		GroupID:   "self",
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
-		RunE: func(_ *cobra.Command, args []string) error {
-			switch args[0] {
-			case "bash":
-				return root.GenBashCompletionV2(os.Stdout, true)
-			case "zsh":
-				return root.GenZshCompletion(os.Stdout)
-			case "fish":
-				return root.GenFishCompletion(os.Stdout, true)
-			case "powershell":
-				return root.GenPowerShellCompletionWithDesc(os.Stdout)
-			}
-			return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish, powershell)", args[0])
-		},
-	}
-}
-
-// newBrowser launches Chrome for Jable scrape commands. Tests override to
-// avoid a live browser.
-var newBrowser = jable.NewBrowser
-
-// newSites builds the site registry used by scrape commands. Tests override
-// to inject fixture fetchers.
-var newSites = app.NewSites
-
-// newScrapeService assembles config, telemetry, a site registry and the app
-// service. The Jable browser starts lazily; the returned cleanup releases it.
-func newScrapeService(cmd *cobra.Command) (*app.Service, func(), error) {
-	svc, tel, err := baseService()
-	if err != nil {
-		return nil, func() {}, err
-	}
-
-	sites := newSites(func(ctx context.Context) (site.Fetcher, func(), error) {
-		browser, err := newBrowser(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("launch browser: %w\n\n  Chrome/Chromium is required to bypass Jable Cloudflare protection.\n  Install from: https://www.google.com/chrome/", err)
-		}
-		return browser, browser.Close, nil
-	})
-	svc.Sites = sites
-
-	cleanup := func() {
-		sites.Close()
-		tel.Shutdown(cmd.Context())
-	}
-	return svc, cleanup, nil
-}
-
-// baseService loads config and telemetry shared by all commands.
-func baseService() (*app.Service, *telemetry.T, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, nil, err
-	}
-	if rootFlags.workers > 0 {
-		cfg.WorkerCount = rootFlags.workers
-	}
-	if rootFlags.outDir != "" {
-		cfg.OutputDir = rootFlags.outDir
-	}
-	maxHeight, err := parseQuality(rootFlags.quality)
-	if err != nil {
-		return nil, nil, err
-	}
-	subtitleMode, err := subtitle.ParseMode(rootFlags.subtitleMode)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	color := ui.ColorEnabled(os.Stdout) && !rootFlags.noColor
-	out := ui.NewStdWriter(os.Stdout, color)
-
-	obsCfg := telemetry.Config{
-		Endpoint: strings.TrimSpace(os.Getenv("OBS_ENDPOINT")),
-		Org:      envOr("OBS_ORG", "jooservices"),
-		Stream:   envOr("OBS_STREAM", "jabledownloader"),
-		User:     os.Getenv("OBS_USER"),
-		Password: os.Getenv("OBS_PASSWORD"),
-	}
-	tel := telemetry.New(obsCfg)
-
-	svc := &app.Service{
-		Config: cfg,
-		Out:    out,
-		Tel:    tel,
-		Opts: app.Options{
-			DryRun:         rootFlags.dryRun,
-			Yes:            rootFlags.yes,
-			Quiet:          rootFlags.quiet,
-			Verbose:        rootFlags.verbose,
-			Force:          rootFlags.force,
-			TTY:            color,
-			Workers:        cfg.WorkerCount,
-			OutDir:         cfg.OutputDir,
-			MaxHeight:      maxHeight,
-			Subtitle:       rootFlags.subtitle,
-			SubtitleMode:   subtitleMode,
-			WhisperModel:   rootFlags.whisperModel,
-			SpokenLanguage: rootFlags.spokenLanguage,
-		},
-	}
-	return svc, tel, nil
-}
-
-func parseQuality(raw string) (int, error) {
-	s := strings.TrimSpace(strings.ToLower(raw))
-	if s == "" || s == "best" {
-		return 0, nil
-	}
-	s = strings.TrimSuffix(s, "p")
-	n, err := strconv.Atoi(s)
-	if err != nil || (n != 240 && n != 360 && n != 480 && n != 720 && n != 1080) {
-		return 0, fmt.Errorf("invalid --quality %q (use best, 240, 360, 480, 720, or 1080)", raw)
-	}
-	return n, nil
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// Test seams for runUpdate (overridden in tests; production keeps package defaults).
-var (
-	fetchLatestRelease = update.LatestRelease
-	installRelease     = update.Install
-)
-
-func runUpdate(ctx context.Context) error {
-	_, tel, err := baseService()
-	if err != nil {
-		return err
-	}
-	defer tel.Shutdown(ctx)
-
-	rel, err := fetchLatestRelease(ctx)
-	if err != nil {
-		return fmt.Errorf("check for updates: %w\n  hint: check your connection; GitHub allows 60 unauthenticated requests/hour", err)
-	}
-	latest := rel.TagName
-	if latest == "" {
-		return fmt.Errorf("latest release has no version tag")
-	}
-
-	fmt.Printf("  Current: %s\n  Latest:  %s\n", version, latest)
-
-	if !update.IsNewer(version, latest) {
-		fmt.Printf("  %s%s Already up to date.%s\n", ui.ColorGreen, ui.IconOk, ui.ColorReset)
-		return nil
-	}
-
-	if updateFlags.checkOnly {
-		fmt.Printf("  %sA newer version is available — run '%s' to install it.%s\n",
-			ui.ColorYellow, "jabledownloader update", ui.ColorReset)
-		return nil
-	}
-
-	asset := rel.AssetFor()
-	if asset == nil {
-		return fmt.Errorf("no prebuilt binary for %s/%s in release %s — build from source instead",
-			runtime.GOOS, runtime.GOARCH, latest)
-	}
-
-	fmt.Printf("  Downloading %s (%.1f MB)...\n", asset.Name, float64(asset.Size)/1e6)
-	if err := installRelease(ctx, asset); err != nil {
-		return err
-	}
-	fmt.Printf("  %s%s Updated to %s%s\n", ui.ColorGreen, ui.IconOk, latest, ui.ColorReset)
-	return nil
 }

@@ -9,27 +9,35 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
+	"github.com/jooservices/go-jabledownloader/internal/domain"
 	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
 var videoLinkRe = regexp.MustCompile(`/videos/([^/]+)/`)
 
-// Latest returns the latest-updates listing.
-func (c *Client) Latest(ctx context.Context, page int) ([]site.VideoEntry, error) {
-	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/latest-updates/?page=%d", BaseURL, page))
+// viewPaths maps list views to Jable listing paths.
+var viewPaths = map[string]string{"latest": "latest-updates", "hot": "hot"}
+
+// List returns a listing page as general-info items.
+func (c *Client) List(ctx context.Context, opts site.ListOptions) ([]domain.Item, error) {
+	view, err := site.CheckView(c.Name(), views, opts.View)
+	if err != nil {
+		return nil, err
+	}
+	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/%s/?page=%d", BaseURL, viewPaths[view], pageOrOne(opts.Page)))
 }
 
-// Hot returns the hot listing.
-func (c *Client) Hot(ctx context.Context, page int) ([]site.VideoEntry, error) {
-	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/hot/?page=%d", BaseURL, page))
+// Search returns search results for query. Query parameters live in the URL.
+func (c *Client) Search(ctx context.Context, query string, page int) ([]domain.Item, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("search keyword is required")
+	}
+	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/search/%s/?page=%d",
+		BaseURL, url.PathEscape(query), pageOrOne(page)))
 }
 
-// Search returns search results for query.
-func (c *Client) Search(ctx context.Context, query string, page int) ([]site.VideoEntry, error) {
-	return c.fetchBrowsePage(ctx, fmt.Sprintf("%s/search/%s/?page=%d", BaseURL, url.PathEscape(query), page))
-}
-
-func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]site.VideoEntry, error) {
+func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]domain.Item, error) {
 	htmlContent, err := c.fetcher.FetchHTML(ctx, pageURL, site.FetchReady)
 	if err != nil {
 		return nil, err
@@ -43,8 +51,8 @@ func (c *Client) fetchBrowsePage(ctx context.Context, pageURL string) ([]site.Vi
 }
 
 // extractVideosFromDoc pulls video entries out of a listing page.
-func extractVideosFromDoc(doc *goquery.Document) []site.VideoEntry {
-	var entries []site.VideoEntry
+func extractVideosFromDoc(doc *goquery.Document) []domain.Item {
+	var entries []domain.Item
 	seen := make(map[string]bool)
 
 	doc.Find(".video-img-box").Each(func(_ int, s *goquery.Selection) {
@@ -55,7 +63,7 @@ func extractVideosFromDoc(doc *goquery.Document) []site.VideoEntry {
 		}
 
 		m := videoLinkRe.FindStringSubmatch(href)
-		if len(m) < 2 {
+		if len(m) < 2 || !codeRe.MatchString(m[1]) {
 			return
 		}
 		code := m[1]
@@ -64,7 +72,8 @@ func extractVideosFromDoc(doc *goquery.Document) []site.VideoEntry {
 		}
 		seen[code] = true
 
-		entry := site.VideoEntry{
+		entry := domain.Item{
+			Site: "jable",
 			Code: code,
 			URL:  BaseURL + "/videos/" + code + "/",
 		}
@@ -81,9 +90,28 @@ func extractVideosFromDoc(doc *goquery.Document) []site.VideoEntry {
 		if duration.Length() > 0 {
 			entry.Duration = strings.TrimSpace(duration.Text())
 		}
+		if image := s.Find("img").First(); image.Length() > 0 {
+			entry.ThumbnailURL = firstAttr(image, "data-src", "data-original", "src")
+		}
 
 		entries = append(entries, entry)
 	})
 
 	return entries
+}
+
+func pageOrOne(page int) int {
+	if page < 1 {
+		return 1
+	}
+	return page
+}
+
+func firstAttr(s *goquery.Selection, names ...string) string {
+	for _, name := range names {
+		if value, ok := s.Attr(name); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

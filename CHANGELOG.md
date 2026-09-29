@@ -6,6 +6,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [4.4.0] - 2026-09-28
+
+### Added
+
+- Subtitle pipeline with replaceable steps (audio → transcribe → translate →
+  apply) and a translator registry; `--subtitle-lang` and `--translator` flags.
+  English still uses Whisper's direct translation by default
+- `--path-template` flag and `path_template` config key for the per-video
+  save path (default `{site}/{code}`)
+- Download locking per video directory (OS file lock; safe across crashes and
+  container restarts)
+- Architecture test enforcing package layering; real-page site fixtures with
+  `go test -tags fixtures` refresh tools
+
+### Changed
+
+- Videos are saved to `<out>/<site>/<code>/`; existing `<out>/<code>/`
+  downloads are still detected
+- Package layout: `internal/engine/{hls,progressive}` replace `internal/hls`
+  and `internal/direct`; `internal/media/*` replaces `internal/subtitle`;
+  `internal/ui/cli` replaces `internal/ui`; the app emits typed events and no
+  longer prints
+- Jable uses one Chrome process (tab per page), waits for Cloudflare
+  challenges to clear, and sends the real browser User-Agent to the CDN
+- Progressive downloads use fixed 8 MiB chunks and honour `--workers`
+- Sidecar subtitles are named `<video>.<lang>.srt`
+- Ctrl-C exits with code `130` and explains how to resume
+- `--verbose` streams Whisper progress to stderr
+
+### Tests
+
+- Added deterministic Playwright/Chromium E2E coverage for the production Jable
+  browser adapter, alongside network-free Go fixture tests
+
+### Fixed
+
+- The video picker starts with nothing selected; confirming an empty
+  selection downloads nothing
+- EPORNER listings showed "duration unknown" for every video
+
+- EPORNER downloads: the media client lost the redirect space-encoding and
+  the desktop User-Agent
+- Media transfers could hang forever on a stalled connection (idle timeout)
+- Data race and zero byte count in HLS segment progress
+- One failed HLS segment triggered a silent full re-download with ffmpeg
+- Concat list broke on paths containing `'`; `METHOD=NONE` keys were treated
+  as encrypted; fMP4 playlists were concatenated incorrectly
+- Quality selection failed when sources were listed tallest first
+- Progress showed wrong totals on retry/resume and during ffmpeg remux, and
+  printed every event twice
+- Confirmation defaulted to "no" on Enter; the picker showed during
+  `--dry-run`/`--quiet`; cancelling it exited with an error
+- `--name` was not recognised as already downloaded
+- Colors leaked into piped output
+- Stale download lock files blocked Docker runs for 24 hours
+
+### Security
+
+- Untrusted video codes and `--name` values can no longer escape the output
+  directory; invalid path templates are rejected at `config set`
+- Chrome keeps its sandbox unless it cannot start (`CHROME_NO_SANDBOX`)
+- ffmpeg inputs are restricted to network protocols; header values cannot
+  inject extra lines; playlist, segment, and chunk bodies are size-bounded
+- Telemetry no longer forces plaintext HTTP, refuses credentials over remote
+  HTTP, and no longer sends titles, inputs, or local paths
+- Self-update verifies the release SHA-256 checksum and bounds download sizes
+
 ## [4.3.0] - 2026-09-16
 
 ### Added
@@ -125,6 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `flickrdownloader` leftovers from the self-update package
 - Removed dead scraper endpoints with no CLI command
 
+[4.4.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.4.0
+[4.3.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.3.0
 [4.2.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.2.0
 [4.1.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.1.0
 [4.0.0]: https://github.com/jooservices/go-jabledownloader/releases/tag/v4.0.0

@@ -4,13 +4,18 @@
 // It is strictly optional and fail-open: when Config.Endpoint is empty the
 // returned T is a no-op, and any exporter failure at startup disables
 // telemetry without affecting the download. When the OBS endpoint is
-// unreachable at runtime, records are silently dropped.
+// unreachable at runtime, records are silently dropped. Callers must not
+// attach personal data (titles, URLs, local paths) to records.
 package telemetry
 
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"net"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -36,6 +41,7 @@ type Config struct {
 	Stream   string // e.g. jabledownloader
 	User     string // ingestion user email
 	Password string
+	Version  string // build version reported as service.version
 }
 
 // T is the telemetry handle. The zero value is disabled.
@@ -50,14 +56,21 @@ type T struct {
 	logger log.Logger
 	meter  metric.Meter
 
-	counters map[string]metric.Int64Counter
+	counters   map[string]metric.Int64Counter
+	histograms map[string]metric.Float64Histogram
+	mu         sync.Mutex
 }
 
-// New builds a telemetry handle. It never fails: on any setup error a
-// disabled handle is returned.
-func New(cfg Config) *T {
+// New builds a telemetry handle. The handle is always usable; when
+// telemetry is off or cannot start it is a no-op, and a non-nil error
+// explains a configuration the caller should report (for example
+// credentials over plaintext HTTP to a remote host).
+func New(cfg Config) (*T, error) {
 	if strings.TrimSpace(cfg.Endpoint) == "" {
-		return &T{}
+		return &T{}, nil
+	}
+	if err := checkEndpoint(cfg.Endpoint, cfg.User != ""); err != nil {
+		return &T{}, err
 	}
 
 	headers := map[string]string{}
@@ -72,16 +85,15 @@ func New(cfg Config) *T {
 	base := strings.TrimRight(cfg.Endpoint, "/") + "/api/" + cfg.Org
 	res := resource.NewSchemaless(
 		semconv.ServiceName(cfg.Stream),
-		semconv.ServiceVersion("dev"),
+		semconv.ServiceVersion(versionOr(cfg.Version)),
 	)
 
 	traceExp, err := otlptracehttp.New(context.Background(),
 		otlptracehttp.WithEndpointURL(base+"/v1/traces"),
 		otlptracehttp.WithHeaders(headers),
-		otlptracehttp.WithInsecure(),
 	)
 	if err != nil {
-		return &T{}
+		return &T{}, nil
 	}
 	traceProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExp, sdktrace.WithBatchTimeout(500*time.Millisecond)),
@@ -91,11 +103,10 @@ func New(cfg Config) *T {
 	metricExp, err := otlpmetrichttp.New(context.Background(),
 		otlpmetrichttp.WithEndpointURL(base+"/v1/metrics"),
 		otlpmetrichttp.WithHeaders(headers),
-		otlpmetrichttp.WithInsecure(),
 	)
 	if err != nil {
 		_ = traceProvider.Shutdown(context.Background())
-		return &T{}
+		return &T{}, nil
 	}
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(1*time.Second))),
@@ -105,12 +116,11 @@ func New(cfg Config) *T {
 	logExp, err := otlploghttp.New(context.Background(),
 		otlploghttp.WithEndpointURL(base+"/v1/logs"),
 		otlploghttp.WithHeaders(headers),
-		otlploghttp.WithInsecure(),
 	)
 	if err != nil {
 		_ = traceProvider.Shutdown(context.Background())
 		_ = meterProvider.Shutdown(context.Background())
-		return &T{}
+		return &T{}, nil
 	}
 	logProvider := sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp, sdklog.WithExportInterval(500*time.Millisecond))),
@@ -131,7 +141,37 @@ func New(cfg Config) *T {
 		logger:        logProvider.Logger("jabledownloader"),
 		meter:         meterProvider.Meter("jabledownloader"),
 		counters:      make(map[string]metric.Int64Counter),
+		histograms:    make(map[string]metric.Float64Histogram),
+	}, nil
+}
+
+// checkEndpoint lets the URL scheme choose TLS. Plain HTTP is accepted
+// only to loopback when credentials are sent, so passwords never cross
+// the network unencrypted.
+func checkEndpoint(endpoint string, hasCredentials bool) error {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("telemetry disabled: invalid OBS_ENDPOINT %q", endpoint)
 	}
+	if u.Scheme == "http" && hasCredentials && !isLoopback(u.Hostname()) {
+		return fmt.Errorf("telemetry disabled: OBS_ENDPOINT %q sends credentials over plain HTTP; use https", endpoint)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func versionOr(v string) string {
+	if v == "" {
+		return "dev"
+	}
+	return v
 }
 
 // Enabled reports whether telemetry is active.
@@ -180,15 +220,18 @@ func (t *T) Count(ctx context.Context, name string, n int64, attrs ...attribute.
 	if !t.Enabled() {
 		return
 	}
+	t.mu.Lock()
 	counter, ok := t.counters[name]
 	if !ok {
 		var err error
 		counter, err = t.meter.Int64Counter(name)
 		if err != nil {
+			t.mu.Unlock()
 			return
 		}
 		t.counters[name] = counter
 	}
+	t.mu.Unlock()
 	counter.Add(ctx, n, metric.WithAttributes(attrs...))
 }
 
@@ -197,10 +240,18 @@ func (t *T) Record(ctx context.Context, name string, ms float64, attrs ...attrib
 	if !t.Enabled() {
 		return
 	}
-	hist, err := t.meter.Float64Histogram(name)
-	if err != nil {
-		return
+	t.mu.Lock()
+	hist, ok := t.histograms[name]
+	if !ok {
+		var err error
+		hist, err = t.meter.Float64Histogram(name)
+		if err != nil {
+			t.mu.Unlock()
+			return
+		}
+		t.histograms[name] = hist
 	}
+	t.mu.Unlock()
 	hist.Record(ctx, ms, metric.WithAttributes(attrs...))
 }
 
