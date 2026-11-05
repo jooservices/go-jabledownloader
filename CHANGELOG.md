@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Upgrade `golang.org/x/net` to v0.62.0. v0.58.0 is affected by GO-2026-6860 and
-  the HTTP/2 fixes released in v0.60.0.
+  the HTTP/2 fixes released in v0.60.0. The language line is now `go 1.26.0`,
+  which those modules require.
 
 ## [4.4.0] - 2026-09-28
 
