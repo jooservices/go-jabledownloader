@@ -10,7 +10,8 @@ import (
 // options holds the persistent flags of one command tree.
 type options struct {
 	outDir, pathTemplate, quality                                        string
-	subtitleMode, subtitleLang, translator, whisperModel, whisperBackend, spokenLanguage string
+	subtitleMode, subtitleLang, translator, whisperModel, spokenLanguage string
+	whisperBackend                                                       string
 	workers                                                              int
 	dryRun, yes, quiet, noColor, verbose, force, subtitle                bool
 }

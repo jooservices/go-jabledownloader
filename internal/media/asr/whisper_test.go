@@ -106,15 +106,15 @@ func TestWhisperValidationAndResolutionErrors(t *testing.T) {
 }
 
 type fakeRunner struct {
-	name      string
-	args      []string
+	name        string
+	args        []string
 	uvx         string
 	whisper     string
 	whisperOnly bool
 	srt         string
-	err       error
-	missing   bool
-	skipWrite bool
+	err         error
+	missing     bool
+	skipWrite   bool
 }
 
 func (f *fakeRunner) LookPath(file string) (string, error) {
