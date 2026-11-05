@@ -1,6 +1,6 @@
 // Package asr transcribes speech with a host Whisper CLI.
-// Apple Silicon uses MLX when it is installed. Intel, AMD, Ubuntu, and
-// Windows use the portable openai-whisper CLI.
+// Apple Silicon uses MLX when mlx_whisper is installed. Every other machine
+// uses the portable openai-whisper CLI.
 package asr
 
 import (

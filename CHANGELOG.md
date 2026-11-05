@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--whisper-backend auto|mlx|whisper`. `auto` uses MLX on Apple Silicon and the
-  portable `whisper` CLI on Intel and AMD (macOS, Ubuntu, Windows). Download,
-  resume, and self-update already ship as `darwin`/`linux`/`windows` × `amd64`/`arm64`.
+- `--whisper-backend auto|mlx|whisper`. `auto` uses MLX on Apple Silicon when
+  `mlx_whisper` is installed, and the portable `whisper` CLI on every other
+  machine (Intel, AMD, and ARM; macOS, Ubuntu, Windows). `uvx` launches MLX
+  only for an explicit `--whisper-backend mlx`. Download, resume, and
+  self-update already ship as `darwin`/`linux`/`windows` × `amd64`/`arm64`.
 
 ### Security
 

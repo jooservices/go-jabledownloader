@@ -19,8 +19,9 @@ This file adds project-only rules.
   headless Chrome (tab per page); keep automation signals off
 - `internal/media` is host-only (ffmpeg + a Whisper CLI): audio → asr →
   translate → subtitle. Default mode soft, spoken language `ja`, target `en`.
-  `--whisper-backend auto` uses MLX on Apple Silicon and `whisper` on Intel/AMD
-  (macOS, Ubuntu, Windows). Defaults: `mlx-community/whisper-medium` and `medium`.
+  `--whisper-backend auto` uses MLX on Apple Silicon when `mlx_whisper` is
+  installed, and `whisper` on every other machine (Intel, AMD, and ARM on
+  macOS, Ubuntu, and Windows). Defaults: `mlx-community/whisper-medium` and `medium`.
   New translators register in `internal/media/translate` and must pass `contracttest.Run`
 - Tests stay network-free and credentials-free. No unit test launches Chrome
   (browser tests use the `e2e` build tag and run via `make test-browser`). Site fixtures are real pages
@@ -34,7 +35,7 @@ This file adds project-only rules.
 - Exit codes: `0` success, `1` error, `2` partial batch or discovery failure
   (`PlanError`, `DiscoveryError`), `130` interrupted (Ctrl-C; re-run resumes)
 - Subtitle embedding is host-only and never required in Docker/CI. Apple Silicon
-  uses `mlx_whisper`; Intel and AMD on macOS, Ubuntu, and Windows use `whisper`.
+  uses an installed `mlx_whisper`; every other machine uses `whisper`.
   Agents must not install packages — document host install commands for the user instead
 - Release assets: `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz` (built by
   `make release`); tags from `master`

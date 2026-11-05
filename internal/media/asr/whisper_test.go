@@ -60,7 +60,7 @@ func TestWhisperSupportsEnglishOnly(t *testing.T) {
 
 func TestWhisperFallsBackToUvx(t *testing.T) {
 	runner := &fakeRunner{uvx: "/usr/bin/uvx", srt: "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
-	w := &Whisper{Runner: runner, GOOS: "darwin", GOARCH: "arm64"}
+	w := &Whisper{Runner: runner, Backend: BackendMLX, GOOS: "darwin", GOARCH: "arm64"}
 	if _, err := w.Transcribe(context.Background(), "audio.wav", "ja"); err != nil {
 		t.Fatal(err)
 	}
@@ -199,8 +199,30 @@ func TestAutoBackendFollowsCPUAndOS(t *testing.T) {
 	if _, err := apple.Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
 		t.Fatal(err)
 	}
-	if both.name != "/usr/bin/uvx" {
-		t.Fatalf("Apple M should use MLX, ran %s", both.name)
+	if both.name != "/usr/bin/whisper" {
+		t.Fatalf("Apple M without mlx_whisper should use whisper, ran %s", both.name)
+	}
+
+	both.name = ""
+	pinned := &Whisper{Runner: both, Backend: BackendWhisper, GOOS: "darwin", GOARCH: "arm64"}
+	if _, err := pinned.Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	if both.name != "/usr/bin/whisper" {
+		t.Fatalf("explicit whisper on Apple M must not use uvx, ran %s", both.name)
+	}
+
+	onlyUVX := &fakeRunner{uvx: "/usr/bin/uvx", srt: srt}
+	if _, err := (&Whisper{Runner: onlyUVX, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "clip.wav", "ja"); err == nil || onlyUVX.name != "" {
+		t.Fatalf("auto must not launch uvx: name=%s err=%v", onlyUVX.name, err)
+	}
+
+	installed := &fakeRunner{srt: srt}
+	if _, err := (&Whisper{Runner: installed, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	if installed.name != "/usr/bin/mlx_whisper" {
+		t.Fatalf("installed mlx_whisper should win, ran %s", installed.name)
 	}
 
 	both.name = ""

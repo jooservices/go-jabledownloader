@@ -10,7 +10,8 @@ import (
 )
 
 // Host speech-to-text engines. MLX uses the Apple Silicon Metal stack.
-// OpenAI Whisper is the portable CLI for Intel and AMD on macOS, Linux, and Windows.
+// OpenAI Whisper is the portable CLI for every other machine: Intel, AMD, and
+// ARM on macOS, Linux, and Windows.
 const (
 	BackendAuto    = "auto"
 	BackendMLX     = "mlx"
@@ -107,10 +108,10 @@ func (whisperEngine) srtPath(outDir, audio string) string {
 	return filepath.Join(outDir, stem+".srt")
 }
 
-// selectEngine picks the host CLI. Apple M prefers MLX. Intel and AMD on
-// every OS prefer the portable Whisper CLI. An explicit backend never falls
-// through to the other one. uvx can launch MLX only on Apple Silicon; on
-// other machines it is not treated as an installed backend.
+// selectEngine picks the host CLI. Apple M prefers an installed mlx_whisper.
+// Every other OS and CPU prefers the portable Whisper CLI. An explicit
+// backend never falls through to the other one. uvx is only a launcher for
+// an explicit mlx choice; auto does not treat it as an installed backend.
 func selectEngine(choice, goos, goarch string, runner media.Runner) (speechEngine, error) {
 	if goos == "" {
 		goos = runtime.GOOS
@@ -125,7 +126,7 @@ func selectEngine(choice, goos, goarch string, runner media.Runner) (speechEngin
 		return whisperEngine{}, nil
 	}
 	apple := goos == "darwin" && goarch == "arm64"
-	mlxReady := look(runner, "mlx_whisper") || (apple && look(runner, "uvx"))
+	mlxReady := look(runner, "mlx_whisper")
 	whisperReady := look(runner, "whisper")
 	switch {
 	case apple && mlxReady:
@@ -146,7 +147,7 @@ func look(runner media.Runner, file string) bool {
 
 func installHint(backend string) string {
 	mlx := "Apple Silicon (M1 or later):\n  uv tool install mlx-whisper\n  or: pipx install mlx-whisper"
-	portable := "Intel or AMD on macOS, Ubuntu, and Windows:\n  pipx install openai-whisper\n  or: pip install openai-whisper"
+	portable := "Intel, AMD, and ARM on macOS, Ubuntu, and Windows:\n  pipx install openai-whisper\n  or: pip install openai-whisper"
 	switch backend {
 	case BackendMLX:
 		return mlx

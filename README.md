@@ -28,7 +28,7 @@ export to the JOOservices OpenObserve platform.
 - v4 runs as `jabledownloader` under the new `go-jabledownloader` module; rewrite call sites and archived settings for the v4 API.
 - Output naming is now `<code>-<codec>.mp4` (e.g. `start-166-h264.mp4`); the codec is resolved from the master playlist.
 - Parallel segment downloads with retry/backoff, cross-run resume, and ffmpeg concat.
-- Optional English soft/hard subtitles via a host Whisper CLI (`--subtitle`). Apple Silicon uses MLX; Intel and AMD on macOS, Ubuntu, and Windows use `whisper`.
+- Optional English soft/hard subtitles via a host Whisper CLI (`--subtitle`). Apple Silicon uses MLX when `mlx_whisper` is installed; every other machine uses `whisper`.
 - Optional, fail-open OpenTelemetry export to JOOservices OpenObserve (`OBS_*` env vars, off by default).
 
 ## Features
@@ -56,7 +56,7 @@ export to the JOOservices OpenObserve platform.
 - `--quality` to cap height (`best`, `240`, `360`, `480`, `720`, `1080`)
 - `--subtitle` — subtitles via a host Whisper CLI; English by default
   (Whisper translates directly), other languages via `--subtitle-lang` + `--translator`.
-  `--whisper-backend auto` picks MLX on Apple Silicon and `whisper` on Intel/AMD
+  `--whisper-backend auto` picks MLX on Apple Silicon when `mlx_whisper` is installed, and `whisper` on every other machine
 - `--subtitle-mode soft|hard` — soft = separate track + `.<lang>.srt`; hard = burn-in
 - `--dry-run` preview with size estimates
 - Videos are saved to `<out>/<site>/<code>/`; customise with `--path-template`
@@ -73,11 +73,12 @@ export to the JOOservices OpenObserve platform.
   ```bash
   # Apple Silicon (M1 or later)
   uv tool install mlx-whisper
-  # Intel or AMD — macOS, Ubuntu, Windows
+  # Intel, AMD, and ARM — macOS, Ubuntu, Windows
   pipx install openai-whisper
   ```
-  `auto` uses MLX when `mlx_whisper` (or, on Apple Silicon, `uvx`) is available,
-  otherwise `whisper`. Override with `--whisper-backend mlx|whisper`.
+  `auto` uses MLX only when `mlx_whisper` is on PATH, otherwise `whisper`.
+  `--whisper-backend mlx` can launch MLX through `uvx` when the binary is absent.
+  Override with `--whisper-backend mlx|whisper`.
   Default model: `mlx-community/whisper-medium` on MLX, `medium` on the portable CLI
   (`--whisper-model`). Do not use `whisper-large-v3-turbo` for English translate — on MLX it often
   keeps Japanese. `--subtitle-mode hard` also needs an ffmpeg build with **libass** (`subtitles`
@@ -86,7 +87,7 @@ export to the JOOservices OpenObserve platform.
 - Go 1.26 only when building from source; prebuilt archives need none
 - Docker is preferred for lint/CI; host Go is OK when it matches `go 1.26`.
   Running the released binary does not require Docker. **Subtitle generation is a
-  host feature** (MLX on Apple Silicon, `whisper` on Intel/AMD) — do not rely on the project Docker image for it.
+  host feature** (MLX on Apple Silicon, `whisper` everywhere else) — do not rely on the project Docker image for it.
 
 ## Installation
 
@@ -137,7 +138,7 @@ pipeline of replaceable steps:
 
 1. **Extract audio** — `ffmpeg` (16 kHz mono WAV).
 2. **Transcribe** — MLX on Apple Silicon (`mlx-community/whisper-medium`) or
-   `whisper` on Intel/AMD (`medium`). Spoken language `--spoken-language`, default `ja`.
+   `whisper` on every other machine (`medium`). Spoken language `--spoken-language`, default `ja`.
 3. **Translate** — with the default `--translator auto` and `--subtitle-lang en`,
    Whisper translates directly (`--task translate`). For any other language,
    Whisper transcribes and the named `--translator` translates.
