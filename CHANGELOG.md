@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `--whisper-backend auto|mlx|whisper`. `auto` uses MLX on Apple Silicon and the
+  portable `whisper` CLI on Intel and AMD (macOS, Ubuntu, Windows). Download,
+  resume, and self-update already ship as `darwin`/`linux`/`windows` × `amd64`/`arm64`.
 
 ## [4.4.0] - 2026-09-28
 
