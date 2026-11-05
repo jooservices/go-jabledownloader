@@ -172,6 +172,9 @@ func (e *Engine) fetchPlaylist(ctx context.Context, rawURL string, headers http.
 // get issues a GET with the source headers and returns a 200 response whose
 // body is guarded by the idle timeout.
 func (e *Engine) get(ctx context.Context, rawURL string, headers http.Header) (*http.Response, error) {
+	if _, err := httpx.AbsoluteHTTP(rawURL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)

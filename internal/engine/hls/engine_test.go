@@ -354,6 +354,9 @@ func TestDownloadValidatesRequest(t *testing.T) {
 	if _, err := e.Download(context.Background(), engine.Request{}, nil); err == nil {
 		t.Fatal("expected validation error")
 	}
+	if _, err := e.Download(context.Background(), request("tcp://127.0.0.1:9/x.m3u8", t.TempDir()), nil); err == nil || !strings.Contains(err.Error(), "http or https") {
+		t.Fatalf("err = %v", err)
+	}
 	req := request("https://cdn.test/x.m3u8", t.TempDir())
 	req.Source.Kind = domain.SourceProgressive
 	if _, err := e.Download(context.Background(), req, nil); err == nil {
@@ -435,6 +438,12 @@ func TestConcatMuxesSegments(t *testing.T) {
 	}
 	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
 		t.Fatalf("output missing: %v", err)
+	}
+}
+
+func TestRemuxArgsRejectsNonHTTP(t *testing.T) {
+	if _, err := remuxArgs("tcp://127.0.0.1:9", nil, "/out.mp4"); err == nil {
+		t.Fatal("expected non-http media URL to be rejected")
 	}
 }
 

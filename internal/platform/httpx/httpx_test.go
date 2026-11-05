@@ -115,6 +115,18 @@ func TestDoAbortsStalledBody(t *testing.T) {
 	}
 }
 
+func TestAbsoluteHTTP(t *testing.T) {
+	ok, err := AbsoluteHTTP("https://cdn.example/a.m3u8")
+	if err != nil || ok.Host != "cdn.example" {
+		t.Fatalf("url=%v err=%v", ok, err)
+	}
+	for _, raw := range []string{"", "tcp://127.0.0.1:22", "file:///etc/passwd", "https://", "/relative.ts"} {
+		if _, err := AbsoluteHTTP(raw); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+}
+
 func TestDoReturnsTransportError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
