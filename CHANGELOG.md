@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   portable `whisper` CLI on Intel and AMD (macOS, Ubuntu, Windows). Download,
   resume, and self-update already ship as `darwin`/`linux`/`windows` × `amd64`/`arm64`.
 
+### Security
+
+- Upgrade `golang.org/x/net` to v0.62.0. v0.58.0 is affected by GO-2026-6860 and
+  the HTTP/2 fixes released in v0.60.0.
+
 ## [4.4.0] - 2026-09-28
 
 ### Added
