@@ -40,10 +40,14 @@ func TestWhisperTranscribeToEnglishUsesTranslate(t *testing.T) {
 }
 
 func TestWhisperRejectsJapaneseDirectEnglishOutput(t *testing.T) {
-	runner := &fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nこんにちは世界\n"}
-	_, err := (&Whisper{Runner: runner}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
-	if err == nil || !strings.Contains(err.Error(), "looks Japanese") {
-		t.Fatalf("expected Japanese validation error, got %v", err)
+	japanese := "1\n00:00:00,000 --> 00:00:01,000\nこんにちは世界\n"
+	_, err := (&Whisper{Runner: &fakeRunner{srt: japanese}, Backend: BackendMLX}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
+	if err == nil || !strings.Contains(err.Error(), "looks Japanese") || !strings.Contains(err.Error(), "mlx-community/whisper-medium") {
+		t.Fatalf("expected MLX model hint, got %v", err)
+	}
+	_, err = (&Whisper{Runner: &fakeRunner{whisper: "/usr/bin/whisper", srt: japanese}, Backend: BackendWhisper}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
+	if err == nil || !strings.Contains(err.Error(), "--whisper-model medium") || strings.Contains(err.Error(), "mlx-community") {
+		t.Fatalf("expected portable model hint, got %v", err)
 	}
 }
 

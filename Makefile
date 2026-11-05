@@ -60,11 +60,11 @@ docker-test: ## Run quality gates inside the build container
 	tools/ci/docker-compose build go
 	tools/ci/docker-compose run --rm go make ci
 
+# amd64 covers Intel and AMD. arm64 covers Apple M and ARM Linux/Windows.
 release: ## Cross-compile release archives into dist/
 	@mkdir -p dist && rm -f dist/*.tar.gz dist/checksums.txt
 	tools/ci/docker-compose run --rm go sh -c '\
 		set -e; mkdir -p /tmp/rel; \
-		# amd64 covers Intel and AMD. arm64 covers Apple M and ARM Linux/Windows.
 		for os in darwin linux windows; do \
 			for arch in amd64 arm64; do \
 				name=jabledownloader_v$(VERSION)_$${os}_$${arch}; \

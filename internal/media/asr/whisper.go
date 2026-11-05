@@ -64,7 +64,8 @@ func (w *Whisper) SupportsTarget(lang string) bool {
 
 // Transcribe produces cues in the spoken language.
 func (w *Whisper) Transcribe(ctx context.Context, audio, spokenLang string) ([]domain.Cue, error) {
-	return w.run(ctx, audio, spokenLang, "transcribe")
+	cues, _, err := w.run(ctx, audio, spokenLang, "transcribe")
+	return cues, err
 }
 
 // TranscribeTo translates speech straight into English.
@@ -72,24 +73,24 @@ func (w *Whisper) TranscribeTo(ctx context.Context, audio, spokenLang, targetLan
 	if !w.SupportsTarget(targetLang) {
 		return nil, fmt.Errorf("whisper cannot translate directly into %q", targetLang)
 	}
-	cues, err := w.run(ctx, audio, spokenLang, "translate")
+	cues, engine, err := w.run(ctx, audio, spokenLang, "translate")
 	if err != nil {
 		return nil, err
 	}
-	return cues, checkEnglish(cues)
+	return cues, checkEnglish(cues, engine.defaultModel())
 }
 
-func (w *Whisper) run(ctx context.Context, audio, spokenLang, task string) ([]domain.Cue, error) {
+func (w *Whisper) run(ctx context.Context, audio, spokenLang, task string) ([]domain.Cue, speechEngine, error) {
 	if strings.TrimSpace(audio) == "" {
-		return nil, errors.New("audio path is required")
+		return nil, nil, errors.New("audio path is required")
 	}
 	engine, argv, err := w.prepared()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	outDir, err := os.MkdirTemp("", "jabledownloader-whisper-*")
 	if err != nil {
-		return nil, fmt.Errorf("create whisper output dir: %w", err)
+		return nil, nil, fmt.Errorf("create whisper output dir: %w", err)
 	}
 	defer os.RemoveAll(outDir)
 
@@ -99,9 +100,10 @@ func (w *Whisper) run(ctx context.Context, audio, spokenLang, task string) ([]do
 	}
 	args := append(append([]string{}, argv[1:]...), engine.args(audio, model, task, outDir, spokenLang)...)
 	if err := w.exec(ctx, argv[0], args); err != nil {
-		return nil, fmt.Errorf("%s %s: %w", engine.name(), task, err)
+		return nil, nil, fmt.Errorf("%s %s: %w", engine.name(), task, err)
 	}
-	return readSRT(engine.srtPath(outDir, audio))
+	cues, err := readSRT(engine.srtPath(outDir, audio))
+	return cues, engine, err
 }
 
 // prepared resolves the backend and its argv. Explicit mlx or whisper never
@@ -151,8 +153,9 @@ func readSRT(path string) ([]domain.Cue, error) {
 }
 
 // checkEnglish rejects output that is still mostly Japanese — the known
-// failure when a model ignores --task translate.
-func checkEnglish(cues []domain.Cue) error {
+// failure when a model ignores --task translate. model is the default for
+// the backend that produced the cues.
+func checkEnglish(cues []domain.Cue, model string) error {
 	var japanese, latin int
 	for _, cue := range cues {
 		for _, r := range cue.Text {
@@ -165,7 +168,7 @@ func checkEnglish(cues []domain.Cue) error {
 		}
 	}
 	if japanese > 0 && (latin == 0 || japanese*2 > latin) {
-		return fmt.Errorf("subtitle output looks Japanese (jp_chars=%d en_chars=%d) — Whisper translate failed for this model; try --whisper-model %s", japanese, latin, DefaultModel)
+		return fmt.Errorf("subtitle output looks Japanese (jp_chars=%d en_chars=%d) — Whisper translate failed for this model; try --whisper-model %s", japanese, latin, model)
 	}
 	return nil
 }
