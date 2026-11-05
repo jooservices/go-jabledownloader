@@ -12,9 +12,9 @@ import (
 
 var errNoLibass = errors.New("hard subtitle burn-in needs ffmpeg built with libass (subtitles filter).\n\n" +
 	"Your current ffmpeg has no 'subtitles' filter.\n" +
-	"Install/rebuild yourself (agents must not install), then confirm:\n" +
-	"  ffmpeg -hide_banner -filters | grep subtitles\n" +
-	"On macOS Homebrew, use a formula build that enables libass, or install a full static build.\n" +
+	"Install or rebuild ffmpeg yourself, then confirm the list contains subtitles:\n" +
+	"  ffmpeg -hide_banner -filters\n" +
+	"macOS Homebrew needs a formula built with libass. Ubuntu and Windows builds usually ship it in the full ffmpeg package.\n" +
 	"Until then use: --subtitle-mode soft")
 
 // Hard burns subtitles into video pixels using ffmpeg's libass filter.
