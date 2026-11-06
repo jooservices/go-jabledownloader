@@ -81,7 +81,13 @@ func LatestRelease(ctx context.Context) (*Release, error) {
 // AssetFor returns the release asset matching this platform
 // (jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz), or nil.
 func (r *Release) AssetFor() *Asset {
-	suffix := fmt.Sprintf("_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	return r.assetFor(runtime.GOOS, runtime.GOARCH)
+}
+
+// assetFor returns the archive for one OS and CPU. amd64 is Intel and AMD.
+// arm64 is Apple Silicon on darwin, and ARM on linux and windows.
+func (r *Release) assetFor(goos, goarch string) *Asset {
+	suffix := fmt.Sprintf("_%s_%s.tar.gz", goos, goarch)
 	var checksumURL string
 	for i := range r.Assets {
 		if filepath.Base(r.Assets[i].Name) == "checksums.txt" {

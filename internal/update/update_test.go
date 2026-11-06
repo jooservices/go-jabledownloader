@@ -90,6 +90,28 @@ func TestValidateAssetURLAndChecksum(t *testing.T) {
 	}
 }
 
+func TestAssetForEveryOSAndCPU(t *testing.T) {
+	platforms := [][2]string{
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"},
+	}
+	rel := Release{}
+	for _, p := range platforms {
+		rel.Assets = append(rel.Assets, Asset{Name: "jabledownloader_v1_" + p[0] + "_" + p[1] + ".tar.gz"})
+	}
+	for _, p := range platforms {
+		got := rel.assetFor(p[0], p[1])
+		want := "jabledownloader_v1_" + p[0] + "_" + p[1] + ".tar.gz"
+		if got == nil || got.Name != want {
+			t.Fatalf("%s/%s asset = %+v, want %s", p[0], p[1], got, want)
+		}
+	}
+	if rel.assetFor("freebsd", "amd64") != nil {
+		t.Fatal("expected no archive for an unreleased OS")
+	}
+}
+
 func TestAssetFor(t *testing.T) {
 	rel := Release{Assets: []Asset{
 		{Name: "jabledownloader_v1.0.0_linux_amd64.tar.gz"},

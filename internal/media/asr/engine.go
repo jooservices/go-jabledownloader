@@ -133,10 +133,12 @@ func selectEngine(choice, goos, goarch string, runner media.Runner) (speechEngin
 		return mlxEngine{}, nil
 	case whisperReady:
 		return whisperEngine{}, nil
-	case mlxReady:
-		return mlxEngine{}, nil
 	default:
-		return nil, fmt.Errorf("no speech-to-text command found\n\n%s", installHint(BackendAuto))
+		hint := BackendWhisper
+		if apple {
+			hint = BackendAuto
+		}
+		return nil, fmt.Errorf("no speech-to-text command found\n\n%s", installHint(hint))
 	}
 }
 
