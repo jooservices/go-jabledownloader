@@ -11,6 +11,7 @@ import (
 type options struct {
 	outDir, pathTemplate, quality                                        string
 	subtitleMode, subtitleLang, translator, whisperModel, spokenLanguage string
+	whisperBackend                                                       string
 	workers                                                              int
 	dryRun, yes, quiet, noColor, verbose, force, subtitle                bool
 }
@@ -39,14 +40,18 @@ func newRootCmd(d deps) *cobra.Command {
 	f.BoolVarP(&o.verbose, "verbose", "v", false, "Verbose output (inputs, source URLs, codec)")
 	f.BoolVarP(&o.force, "force", "f", false, "Re-download even if the video file already exists")
 	f.StringVar(&o.quality, "quality", "best", "Max video height: best, 240, 360, 480, 720, 1080")
-	f.BoolVar(&o.subtitle, "subtitle", false, "Add subtitles (host mlx_whisper + ffmpeg)")
+	f.BoolVar(&o.subtitle, "subtitle", false, "Add subtitles (host Whisper CLI + ffmpeg)")
 	f.StringVar(&o.subtitleMode, "subtitle-mode", "soft", "Subtitle style: soft (separate track) or hard (burn-in)")
 	f.StringVar(&o.subtitleLang, "subtitle-lang", "en", "Subtitle language (ISO 639 code, e.g. en, vi)")
 	f.StringVar(&o.translator, "translator", media.TranslatorAuto, "Subtitle translator; auto lets Whisper translate to English directly")
-	f.StringVar(&o.whisperModel, "whisper-model", "", "mlx_whisper model (default: mlx-community/whisper-medium)")
+	f.StringVar(&o.whisperModel, "whisper-model", "", "Whisper model (MLX default: mlx-community/whisper-medium; portable default: medium)")
+	f.StringVar(&o.whisperBackend, "whisper-backend", "auto", "Speech engine: auto, mlx (Apple Silicon), whisper (every other OS and CPU)")
 	f.StringVar(&o.spokenLanguage, "spoken-language", "ja", "Spoken language hint for Whisper (empty = auto-detect)")
 	_ = root.RegisterFlagCompletionFunc("translator", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return append([]string{media.TranslatorAuto}, translate.Default.Names()...), cobra.ShellCompDirectiveNoFileComp
+	})
+	_ = root.RegisterFlagCompletionFunc("whisper-backend", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"auto", "mlx", "whisper"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	root.AddGroup(

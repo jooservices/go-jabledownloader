@@ -94,6 +94,11 @@ jobs:
       - name: Build release archives
         run: make release VERSION="${GITHUB_REF_NAME#v}"
 
+      - name: Sign checksums
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: tools/ci/docker-compose run --rm -e RELEASE_SIGNING_KEY go go run ./tools/release-sign dist/checksums.txt dist/checksums.txt.sig
+
       - name: Install GitHub CLI
         run: |
           curl -sSL https://github.com/cli/cli/releases/download/v2.63.2/gh_2.63.2_linux_amd64.tar.gz | tar xz -C /tmp
@@ -108,4 +113,5 @@ jobs:
             --generate-notes \
             dist/*.tar.gz \
             dist/checksums.txt \
+            dist/checksums.txt.sig \
             sbom.spdx.json

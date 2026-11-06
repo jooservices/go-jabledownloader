@@ -19,8 +19,9 @@ Thank you for using `jooservices/go-jabledownloader`. Here is where to get help.
 - Usage questions and bug reports: [GitHub Issues](https://github.com/jooservices/go-jabledownloader/issues)
 - Please include: OS, CLI version (`jabledownloader --version`), command line,
   expected vs actual behavior. For `--subtitle` issues, also include
-  `mlx_whisper` availability, `--whisper-model` / `--subtitle-mode`, and whether
-  `ffmpeg -filters | grep subtitles` shows the libass filter (hard mode only).
+  which Whisper CLI is on PATH (`mlx_whisper` or `whisper`), `--whisper-backend`,
+  `--whisper-model` / `--subtitle-mode`, and whether `ffmpeg -hide_banner -filters`
+  lists the libass `subtitles` filter (hard mode only).
 
 ## Security
 

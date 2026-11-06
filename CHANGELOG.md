@@ -6,7 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `--whisper-backend auto|mlx|whisper`. `auto` uses MLX only on Apple Silicon
+  when `mlx_whisper` is installed. Intel and AMD Macs, and Intel, AMD, and ARM
+  on Ubuntu and Windows, use the portable `whisper` CLI. `uvx` launches MLX
+  only for an explicit `--whisper-backend mlx`. Download, resume, and
+  self-update already ship as `darwin`/`linux`/`windows` × `amd64`/`arm64`.
+
+### Security
+
+- Upgrade `golang.org/x/net` to v0.62.0. v0.58.0 is affected by GO-2026-6860 and
+  the HTTP/2 fixes released in v0.60.0. The language line is now `go 1.26.0`,
+  which those modules require.
+- Media downloads accept only absolute `http` and `https` URLs, including the
+  ffmpeg remux path. The runtime image runs as a non-root user.
+- Self-update accepts `checksums.txt` only when `checksums.txt.sig` verifies
+  with the embedded ed25519 release key.
 
 ## [4.4.0] - 2026-09-28
 

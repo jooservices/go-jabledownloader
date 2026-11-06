@@ -215,12 +215,13 @@ func TestDownloadWritesIntoSiteLayout(t *testing.T) {
 func TestDownloadRejectsBadInputsBeforeWork(t *testing.T) {
 	m := loadJableManifest(t)
 	for name, args := range map[string][]string{
-		"name path":     {"download", m.VideoCode, "--name", "../x.mp4"},
-		"quality":       {"download", m.VideoCode, "--quality", "4k"},
-		"path template": {"download", m.VideoCode, "--path-template", "../{code}"},
-		"subtitle mode": {"download", m.VideoCode, "--subtitle-mode", "burn"},
-		"subtitle lang": {"download", m.VideoCode, "--subtitle", "--subtitle-lang", "../x"},
-		"translator":    {"download", m.VideoCode, "--subtitle", "--translator", "missing"},
+		"name path":       {"download", m.VideoCode, "--name", "../x.mp4"},
+		"quality":         {"download", m.VideoCode, "--quality", "4k"},
+		"path template":   {"download", m.VideoCode, "--path-template", "../{code}"},
+		"subtitle mode":   {"download", m.VideoCode, "--subtitle-mode", "burn"},
+		"subtitle lang":   {"download", m.VideoCode, "--subtitle", "--subtitle-lang", "../x"},
+		"translator":      {"download", m.VideoCode, "--subtitle", "--translator", "missing"},
+		"whisper backend": {"download", m.VideoCode, "--whisper-backend", "cuda"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
