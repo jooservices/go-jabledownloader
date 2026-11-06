@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which those modules require.
 - Media downloads accept only absolute `http` and `https` URLs, including the
   ffmpeg remux path. The runtime image runs as a non-root user.
+- Self-update accepts `checksums.txt` only when `checksums.txt.sig` verifies
+  with the embedded ed25519 release key.
 
 ## [4.4.0] - 2026-09-28
 

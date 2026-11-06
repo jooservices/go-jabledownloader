@@ -37,6 +37,7 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 	ChecksumURL        string `json:"-"`
+	SignatureURL       string `json:"-"`
 }
 
 // Release is GitHub release metadata.
@@ -88,16 +89,19 @@ func (r *Release) AssetFor() *Asset {
 // arm64 is Apple Silicon on darwin, and ARM on linux and windows.
 func (r *Release) assetFor(goos, goarch string) *Asset {
 	suffix := fmt.Sprintf("_%s_%s.tar.gz", goos, goarch)
-	var checksumURL string
+	var checksumURL, signatureURL string
 	for i := range r.Assets {
-		if filepath.Base(r.Assets[i].Name) == "checksums.txt" {
+		switch filepath.Base(r.Assets[i].Name) {
+		case "checksums.txt":
 			checksumURL = r.Assets[i].BrowserDownloadURL
-			break
+		case "checksums.txt.sig":
+			signatureURL = r.Assets[i].BrowserDownloadURL
 		}
 	}
 	for i := range r.Assets {
 		if strings.HasSuffix(r.Assets[i].Name, suffix) {
 			r.Assets[i].ChecksumURL = checksumURL
+			r.Assets[i].SignatureURL = signatureURL
 			return &r.Assets[i]
 		}
 	}
@@ -141,10 +145,10 @@ func parseVersion(v string) [3]int {
 // lookUpExecutable locates the running binary. Tests override it.
 var lookUpExecutable = os.Executable
 
-// Install downloads the asset archive, verifies its SHA-256 against the
-// release checksums.txt, extracts the binary and replaces the running
-// executable (keeping a .old backup until the new binary is in place). The
-// returned warnings are non-fatal and meant for the user.
+// Install downloads the asset archive, checks the ed25519 signature of
+// checksums.txt, verifies the archive SHA-256, extracts the binary and
+// replaces the running executable (keeping a .old backup until the new binary
+// is in place). The returned warnings are non-fatal and meant for the user.
 func Install(ctx context.Context, a *Asset) ([]string, error) {
 	var warnings []string
 	if a == nil {
@@ -153,10 +157,16 @@ func Install(ctx context.Context, a *Asset) ([]string, error) {
 	if a.ChecksumURL == "" {
 		return warnings, fmt.Errorf("no checksums asset in release")
 	}
+	if a.SignatureURL == "" {
+		return warnings, fmt.Errorf("no checksums signature in release")
+	}
 	if err := validateAssetURL(a.BrowserDownloadURL); err != nil {
 		return warnings, err
 	}
 	if err := validateAssetURL(a.ChecksumURL); err != nil {
+		return warnings, err
+	}
+	if err := validateAssetURL(a.SignatureURL); err != nil {
 		return warnings, err
 	}
 	if a.Size > maxUpdateSize {
@@ -171,6 +181,13 @@ func Install(ctx context.Context, a *Asset) ([]string, error) {
 
 	checksumPath := filepath.Join(tmp, "checksums.txt")
 	if err := downloadChecksums(ctx, a.ChecksumURL, checksumPath); err != nil {
+		return warnings, err
+	}
+	signaturePath := filepath.Join(tmp, "checksums.txt.sig")
+	if err := downloadLimited(ctx, a.SignatureURL, signaturePath, "signature"); err != nil {
+		return warnings, err
+	}
+	if err := verifyChecksumSignature(checksumPath, signaturePath); err != nil {
 		return warnings, err
 	}
 
@@ -262,35 +279,55 @@ func validateAssetURL(raw string) error {
 }
 
 func downloadChecksums(ctx context.Context, rawURL, dest string) error {
+	return downloadLimited(ctx, rawURL, dest, "checksums")
+}
+
+func downloadLimited(ctx context.Context, rawURL, dest, name string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return fmt.Errorf("create checksum request: %w", err)
+		return fmt.Errorf("create %s request: %w", name, err)
 	}
 	req.Header.Set("User-Agent", BinName)
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("download checksums: %w", err)
+		return fmt.Errorf("download %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download checksums: http status %d", resp.StatusCode)
+		return fmt.Errorf("download %s: http status %d", name, resp.StatusCode)
 	}
 	if resp.ContentLength > maxChecksumSize {
-		return fmt.Errorf("checksums file is too large")
+		return fmt.Errorf("%s file is too large", name)
 	}
 	out, err := os.Create(dest)
 	if err != nil {
-		return fmt.Errorf("create checksums file: %w", err)
+		return fmt.Errorf("create %s file: %w", name, err)
 	}
 	defer out.Close()
 	n, err := io.Copy(out, io.LimitReader(resp.Body, maxChecksumSize+1))
 	if err != nil {
-		return fmt.Errorf("write checksums: %w", err)
+		return fmt.Errorf("write %s: %w", name, err)
 	}
 	if n > maxChecksumSize {
-		return fmt.Errorf("checksums file is too large")
+		return fmt.Errorf("%s file is too large", name)
 	}
 	return nil
+}
+
+func verifyChecksumSignature(checksumPath, signaturePath string) error {
+	message, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return fmt.Errorf("read checksums: %w", err)
+	}
+	raw, err := os.ReadFile(signaturePath)
+	if err != nil {
+		return fmt.Errorf("read checksums signature: %w", err)
+	}
+	signature, err := decodeSignature(raw)
+	if err != nil {
+		return err
+	}
+	return verifySignature(message, signature)
 }
 
 func verifyChecksum(checksumPath, archivePath, assetName string) error {
