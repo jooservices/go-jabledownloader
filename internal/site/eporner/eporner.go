@@ -37,7 +37,7 @@ var referer = http.Header{"Referer": {BaseURL + "/"}}
 func init() {
 	site.Register(site.Descriptor{
 		Name: "eporner", Hosts: []string{"eporner.com"},
-		Fetcher: site.FetcherHTTP, Views: views, Headers: referer,
+		Fetcher: site.FetcherBrowser, Views: views, Headers: referer,
 		New: func(f site.Fetcher) site.Site { return NewClient(f) },
 	})
 }
