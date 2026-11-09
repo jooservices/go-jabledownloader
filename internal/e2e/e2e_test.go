@@ -47,6 +47,9 @@ type e2eSite struct{}
 
 func (e2eSite) Name() string { return "e2e" }
 func (e2eSite) List(context.Context, site.ListOptions) ([]domain.Item, error) {
+	if items, ok := listingOverride(); ok {
+		return items, nil
+	}
 	return []domain.Item{{Site: "e2e", Code: "hls-1", Title: "HLS", URL: baseURL() + "/watch/hls-1"}}, nil
 }
 func (e2eSite) Search(context.Context, string, int) ([]domain.Item, error) { return nil, nil }
