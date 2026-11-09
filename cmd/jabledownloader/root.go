@@ -52,6 +52,7 @@ func newRootCmd(d deps) *cobra.Command {
 	root.AddGroup(
 		&cobra.Group{ID: "download", Title: "Download:"},
 		&cobra.Group{ID: "discovery", Title: "Discovery:"},
+		&cobra.Group{ID: "daemon", Title: "Always-on:"},
 		&cobra.Group{ID: "self", Title: "Self-management:"},
 	)
 	root.AddCommand(
@@ -61,6 +62,8 @@ func newRootCmd(d deps) *cobra.Command {
 		newSearchCmd(o, d),
 		newSiteCmd(o, d),
 		newUpdateCmd(d),
+		newServeCmd(o, d),
+		newMCPCmd(o, d),
 		newConfigCmd(),
 		newCompletionCmd(root),
 	)

@@ -270,3 +270,30 @@ listing parsing and HLS-detail extraction. It never calls third-party sites.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Running 24/7 (API, MCP, auto-download)
+
+```bash
+# HTTP API + MCP endpoint on 127.0.0.1:8787, monitoring subscriptions
+jabledownloader serve --out /data
+
+# Off loopback an API token is mandatory
+JABLEDOWNLOADER_API_TOKEN=secret jabledownloader serve --addr 0.0.0.0:8787
+
+# Telegram notifications for new and finished downloads
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... jabledownloader serve
+
+# MCP over stdio for an AI assistant (Claude Desktop, etc.)
+#   {"mcpServers":{"jabledownloader":{"command":"jabledownloader","args":["mcp"]}}}
+```
+
+API: `GET /v1/latest`, `/v1/search?q=`, `/v1/inspect?input=`; `POST /v1/downloads
+{"input": url-or-code}`; `GET /v1/jobs[/id]`; `GET|POST /v1/subscriptions`,
+`DELETE /v1/subscriptions/{id}`, `POST /v1/subscriptions/{id}/poll`. A
+subscription follows a keyword (`kind: "search"`: actor, tag, studio) or a
+listing (`kind: "view"`); new items are downloaded automatically. The first
+check only records what already exists unless `backfill` is true.
+
+If a network blocks a site's DNS, `JABLEDOWNLOADER_DNS=auto` (default) falls
+back to DNS-over-HTTPS; use `off` to disable or a comma-separated list of DoH
+JSON endpoints to choose your own.

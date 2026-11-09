@@ -85,3 +85,12 @@ func TestResolverRules(t *testing.T) {
 		t.Fatalf("failed DoH must not pin, got %q", got)
 	}
 }
+
+func TestTransientNetError(t *testing.T) {
+	if !transientNetError(errors.New("chromedp: page load error net::ERR_CONNECTION_CLOSED")) {
+		t.Fatal("connection closed is transient")
+	}
+	if transientNetError(ErrCloudflareChallenge) || transientNetError(errors.New("net::ERR_NAME_NOT_RESOLVED")) {
+		t.Fatal("challenges and DNS failures are not retried")
+	}
+}

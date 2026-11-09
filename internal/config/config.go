@@ -98,3 +98,9 @@ func applyDefaults(c *Config) *Config {
 	}
 	return c
 }
+
+// StatePath returns the location of the monitor state file (subscriptions,
+// seen items, jobs), next to the config file.
+func StatePath() string {
+	return filepath.Join(configDir(), "state.json")
+}

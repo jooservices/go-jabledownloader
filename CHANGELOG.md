@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `serve` runs the downloader 24/7: a JSON HTTP API (`/v1/...`) and an MCP
+  endpoint (`POST /mcp`), monitoring subscriptions and downloading new videos
+  automatically; `mcp` serves MCP over stdio for AI assistants. Telegram
+  notifications via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`
+- `JABLEDOWNLOADER_DNS` (auto/off/doh/<urls>): DNS-over-HTTPS fallback when the
+  system resolver blocks or sinkholes a site; round-robin addresses are raced
+- Jable page loads retry transient connection errors
 - `JABLEDOWNLOADER_CONFIG_DIR` overrides the config directory; new installs use
   the OS-native config directory (an existing `~/.config` one is kept)
 - Chrome, Chromium, Edge, or Brave is auto-detected on Windows, macOS, and

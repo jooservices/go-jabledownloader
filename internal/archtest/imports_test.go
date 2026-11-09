@@ -24,6 +24,12 @@ var rules = map[string][]string{
 	// translators, and the UI are wired in cmd.
 	"internal/app": {"internal/ui", "internal/media", "internal/engine/", "internal/site/", "internal/platform/"},
 	"internal/ui":  {"internal/engine", "internal/site", "internal/media", "internal/config", "internal/telemetry"},
+	// The always-on layer is infrastructure-agnostic: it sees the domain and
+	// its own ports, never concrete sites, engines, or the app use-cases.
+	"internal/store":   {"internal/app", "internal/ui", "internal/engine", "internal/site", "internal/media", "internal/config", "internal/telemetry", "internal/platform"},
+	"internal/notify":  {"internal/app", "internal/ui", "internal/engine", "internal/site", "internal/media", "internal/config", "internal/telemetry"},
+	"internal/monitor": {"internal/app", "internal/ui", "internal/engine", "internal/site", "internal/media", "internal/config", "internal/telemetry", "internal/platform"},
+	"internal/server":  {"internal/app", "internal/ui", "internal/engine", "internal/site", "internal/media", "internal/config", "internal/telemetry", "internal/platform"},
 }
 
 // allowed carves exceptions out of a rule.

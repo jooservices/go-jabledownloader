@@ -29,6 +29,24 @@ const (
 	pollInterval = 500 * time.Millisecond
 )
 
+const (
+	fetchAttempts = 3
+	retryDelay    = 2 * time.Second
+)
+
+// transientNetError reports a connection-level failure worth retrying (the
+// site or its CDN dropped the connection), as opposed to a challenge or parse
+// failure.
+func transientNetError(err error) bool {
+	s := err.Error()
+	for _, marker := range []string{"ERR_CONNECTION_CLOSED", "ERR_CONNECTION_RESET", "ERR_CONNECTION_TIMED_OUT", "ERR_TIMED_OUT", "ERR_EMPTY_RESPONSE", "ERR_NETWORK_CHANGED", "ERR_SSL_PROTOCOL_ERROR"} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // ErrCloudflareChallenge means the Cloudflare challenge did not clear.
 var ErrCloudflareChallenge = errors.New("cloudflare challenge did not clear")
 
@@ -148,6 +166,26 @@ func (b *Browser) UserAgent() string { return b.ua }
 // Cloudflare challenge has cleared (and, for FetchHLS, once the player has
 // injected its stream URL).
 func (b *Browser) FetchHTML(ctx context.Context, url string, mode site.FetchMode) (string, error) {
+	var html string
+	var err error
+	for attempt := 0; attempt < fetchAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * retryDelay):
+			}
+		}
+		html, err = b.fetchOnce(ctx, url, mode)
+		if err == nil || !transientNetError(err) {
+			return html, err
+		}
+	}
+	return "", err
+}
+
+// fetchOnce is one navigation attempt.
+func (b *Browser) fetchOnce(ctx context.Context, url string, mode site.FetchMode) (string, error) {
 	tabCtx, cancelTab := chromedp.NewContext(b.browserCtx)
 	defer cancelTab()
 	stop := context.AfterFunc(ctx, cancelTab)

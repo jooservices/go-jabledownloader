@@ -44,3 +44,12 @@ This file adds project-only rules.
   matches `go 1.26`. GitHub Actions runs on `ubuntu-latest`
 - Branch model: `develop` for integration, `master` for production, tags from
   `master`
+- Always-on layer: `internal/store` (JSON state file, atomic writes),
+  `internal/notify` (Telegram; fail-open), `internal/monitor` (poll
+  subscriptions → queue → download with retries), `internal/server` (HTTP API +
+  MCP over one `Core`). They import only `domain` and their own ports;
+  `cmd/jabledownloader/serve.go` adapts `app.Service` to them. The first poll
+  of a subscription records a baseline unless `backfill` is set. The API binds
+  loopback and refuses a non-loopback address without a token
+- `JABLEDOWNLOADER_DNS` controls name resolution (`internal/platform/httpx`):
+  never change OS DNS settings from the app
