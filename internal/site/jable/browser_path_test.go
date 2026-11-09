@@ -1,9 +1,15 @@
 package jable
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/jooservices/go-jabledownloader/internal/platform/httpx"
 )
 
 func TestDetectBrowser(t *testing.T) {
@@ -52,4 +58,30 @@ func TestHostProbeIsUsable(t *testing.T) {
 		t.Fatal("directories must not count as browsers")
 	}
 	_ = detectBrowser(p) // must not panic on the real host
+}
+
+func TestResolverRules(t *testing.T) {
+	doh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"Status":0,"Answer":[{"type":1,"data":"198.51.100.7"}]}`)
+	}))
+	defer doh.Close()
+	ctx := context.Background()
+
+	// .invalid never resolves, so the system answer is "blocked" offline too.
+	if got := resolverRules(ctx, httpx.NewResolver(doh.URL), "https://blocked.invalid/x"); got != "MAP blocked.invalid 198.51.100.7" {
+		t.Fatalf("rules = %q", got)
+	}
+	if got := resolverRules(ctx, httpx.NewResolver("off"), "https://blocked.invalid"); got != "" {
+		t.Fatalf("off must not pin, got %q", got)
+	}
+	if got := resolverRules(ctx, httpx.NewResolver(doh.URL), "https://127.0.0.1"); got != "" {
+		t.Fatalf("literal IPs must not pin, got %q", got)
+	}
+	if got := resolverRules(ctx, httpx.NewResolver(doh.URL), "://bad"); got != "" {
+		t.Fatalf("bad URL must not pin, got %q", got)
+	}
+	dead := httpx.NewResolver("http://127.0.0.1:1/x")
+	if got := resolverRules(ctx, dead, "https://blocked.invalid"); got != "" {
+		t.Fatalf("failed DoH must not pin, got %q", got)
+	}
 }

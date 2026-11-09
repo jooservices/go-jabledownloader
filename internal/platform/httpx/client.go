@@ -24,6 +24,9 @@ type Options struct {
 	Workers int
 	// ResponseHeaderTimeout bounds the wait for response headers.
 	ResponseHeaderTimeout time.Duration
+	// Resolver resolves host names. Nil uses the shared resolver configured by
+	// the JABLEDOWNLOADER_DNS variable.
+	Resolver *Resolver
 }
 
 // NewClient returns a client with the module defaults applied.
@@ -32,10 +35,14 @@ func NewClient(opts Options) *http.Client {
 		opts.ResponseHeaderTimeout = 30 * time.Second
 	}
 	workers := max(opts.Workers, 1)
+	resolver := opts.Resolver
+	if resolver == nil {
+		resolver = SharedResolver()
+	}
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		DialContext:           resolver.DialContext(dialer),
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          workers,
 		MaxIdleConnsPerHost:   workers,

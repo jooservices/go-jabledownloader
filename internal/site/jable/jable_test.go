@@ -258,9 +258,9 @@ func TestLaunchPlan(t *testing.T) {
 }
 
 func TestAllocatorOptionsAddsOptionalFlags(t *testing.T) {
-	base := len(allocatorOptions(false, "", ""))
-	if got := len(allocatorOptions(true, "/chrome", "/profile")); got != base+3 {
-		t.Fatalf("options = %d, want %d", got, base+3)
+	base := len(allocatorOptions(false, "", "", ""))
+	if got := len(allocatorOptions(true, "/chrome", "/profile", "MAP a 1.2.3.4")); got != base+4 {
+		t.Fatalf("options = %d, want %d", got, base+4)
 	}
 }
 

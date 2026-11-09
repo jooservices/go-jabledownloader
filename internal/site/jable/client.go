@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 
+	"github.com/jooservices/go-jabledownloader/internal/platform/httpx"
 	"github.com/jooservices/go-jabledownloader/internal/site"
 )
 
@@ -54,8 +56,9 @@ func NewBrowser(ctx context.Context) (*Browser, error) {
 	if strings.TrimSpace(chromePath) == "" {
 		chromePath = detectBrowser(hostProbe())
 	}
+	rules := resolverRules(ctx, httpx.SharedResolver(), BaseURL)
 	for i, noSandbox := range launchPlan(os.Getenv("CHROME_NO_SANDBOX")) {
-		b, err := launch(ctx, allocatorOptions(noSandbox, chromePath, os.Getenv("JABLE_CHROME_PROFILE")))
+		b, err := launch(ctx, allocatorOptions(noSandbox, chromePath, os.Getenv("JABLE_CHROME_PROFILE"), rules))
 		if err == nil {
 			b.SandboxFallback = i > 0
 			return b, nil
@@ -80,7 +83,7 @@ func launchPlan(env string) []bool {
 // allocatorOptions builds the Chrome flags. Automation signals Cloudflare
 // checks (navigator.webdriver) are disabled; chromedp itself adds
 // --no-sandbox when running as root.
-func allocatorOptions(noSandbox bool, chromePath, profileDir string) []chromedp.ExecAllocatorOption {
+func allocatorOptions(noSandbox bool, chromePath, profileDir, hostRules string) []chromedp.ExecAllocatorOption {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", "new"),
 		chromedp.Flag("disable-gpu", true),
@@ -96,6 +99,9 @@ func allocatorOptions(noSandbox bool, chromePath, profileDir string) []chromedp.
 	}
 	if dir := strings.TrimSpace(profileDir); dir != "" {
 		opts = append(opts, chromedp.UserDataDir(dir))
+	}
+	if hostRules != "" {
+		opts = append(opts, chromedp.Flag("host-resolver-rules", hostRules))
 	}
 	return opts
 }
@@ -229,4 +235,20 @@ func poll(ctx context.Context, timeout, interval time.Duration, ready func() (bo
 		case <-ticker.C:
 		}
 	}
+}
+
+// resolverRules returns Chrome --host-resolver-rules that pin the site host to
+// the addresses found by DNS-over-HTTPS when the system resolver is blocking
+// it (Chrome has its own stack and would otherwise hit the sinkhole). It is
+// empty when system DNS works, so rotating CDN addresses keep being followed.
+func resolverRules(ctx context.Context, r *httpx.Resolver, rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	ips, overridden := r.Overridden(ctx, u.Hostname())
+	if !overridden || len(ips) == 0 {
+		return ""
+	}
+	return "MAP " + u.Hostname() + " " + ips[0].String()
 }
