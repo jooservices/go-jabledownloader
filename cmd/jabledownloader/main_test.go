@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jooservices/go-jabledownloader/internal/app"
+	"github.com/jooservices/go-jabledownloader/internal/config"
 	"github.com/jooservices/go-jabledownloader/internal/domain"
 	"github.com/jooservices/go-jabledownloader/internal/engine"
 	"github.com/jooservices/go-jabledownloader/internal/site"
@@ -79,6 +80,8 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(config.DirEnv, filepath.Join(home, "cfg"))
 	t.Setenv("OBS_ENDPOINT", "")
 	h := &harness{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, home: home}
 	h.deps = deps{

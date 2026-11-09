@@ -22,7 +22,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolate(t)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -33,10 +33,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 }
 
 func TestLoadExistingFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	dir := filepath.Join(home, ".config", "jabledownloader")
+	dir := isolate(t)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -61,14 +58,14 @@ func TestLoadExistingFile(t *testing.T) {
 }
 
 func TestPath(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if !strings.Contains(Path(), "jabledownloader") {
+	isolate(t)
+	if filepath.Base(Path()) != "config.json" {
 		t.Fatalf("Path() = %q", Path())
 	}
 }
 
 func TestSaveAndReload(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolate(t)
 
 	cfg := Defaults()
 	cfg.OutputDir = "/tmp/save-test"
@@ -88,10 +85,7 @@ func TestSaveAndReload(t *testing.T) {
 }
 
 func TestLoadInvalidJSON(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	dir := filepath.Join(home, ".config", "jabledownloader")
+	dir := isolate(t)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -105,5 +99,42 @@ func TestLoadInvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parse config") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// isolate points the config at a private directory so tests never touch the
+// real user config, on any OS.
+func isolate(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "cfg")
+	t.Setenv(DirEnv, dir)
+	return dir
+}
+
+func TestConfigDirPrecedence(t *testing.T) {
+	t.Setenv(DirEnv, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("APPDATA", filepath.Join(home, "appdata"))
+
+	native := configDir()
+	if filepath.Base(native) != "jabledownloader" {
+		t.Fatalf("native dir = %q", native)
+	}
+	legacy := filepath.Join(home, ".config", "jabledownloader")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := configDir(); got != legacy {
+		t.Fatalf("legacy config not preferred: %q", got)
+	}
+	t.Setenv(DirEnv, "/custom")
+	if got := configDir(); got != "/custom" {
+		t.Fatalf("env override ignored: %q", got)
 	}
 }

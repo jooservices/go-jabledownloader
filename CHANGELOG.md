@@ -6,7 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- Windows: the download lock file is now released (it could not be deleted
+  while open); path templates naming a drive, UNC share, or a rooted path are
+  rejected on every OS; tests no longer read or overwrite the real user config
+
+### Added
+
+- `JABLEDOWNLOADER_CONFIG_DIR` overrides the config directory; new installs use
+  the OS-native config directory (an existing `~/.config` one is kept)
+- Chrome, Chromium, Edge, or Brave is auto-detected on Windows, macOS, and
+  Linux when `CHROME_PATH` is unset
+- `.gitattributes` forces LF line endings; `make test-e2e` runs a hermetic
+  end-to-end suite (HLS, resume, progressive chunks, galleries) with real ffmpeg
 
 ## [4.4.0] - 2026-09-28
 

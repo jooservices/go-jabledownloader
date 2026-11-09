@@ -72,8 +72,7 @@ func ValidatePathTemplate(template string) error {
 	if !strings.Contains(template, "{code}") {
 		return fmt.Errorf("path template %q must contain {code}", template)
 	}
-	resolved := filepath.Clean(strings.NewReplacer("{site}", "site", "{code}", "code").Replace(template))
-	if filepath.IsAbs(resolved) || resolved == ".." || strings.HasPrefix(resolved, ".."+string(filepath.Separator)) {
+	if templateEscapes(template) {
 		return fmt.Errorf("path template %q escapes output dir", template)
 	}
 	for rest := template; ; {
@@ -90,6 +89,33 @@ func ValidatePathTemplate(template string) error {
 		}
 		rest = rest[start+end+1:]
 	}
+}
+
+// templateEscapes reports a template that is rooted, names a drive or UNC
+// share, or climbs out with "..". Both separators are checked on every OS so
+// a template valid on Linux cannot become an escape when synced to Windows.
+func templateEscapes(template string) bool {
+	resolved := strings.NewReplacer("{site}", "site", "{code}", "code").Replace(template)
+	if resolved == "" || strings.ContainsAny(resolved[:1], `/\`) || filepath.IsAbs(resolved) || filepath.VolumeName(resolved) != "" {
+		return true
+	}
+	if len(resolved) >= 2 && resolved[1] == ':' {
+		return true // drive-relative, e.g. "C:x"
+	}
+	depth := 0
+	for _, part := range strings.FieldsFunc(resolved, func(r rune) bool { return r == '/' || r == '\\' }) {
+		switch part {
+		case ".":
+		case "..":
+			depth--
+			if depth < 0 {
+				return true
+			}
+		default:
+			depth++
+		}
+	}
+	return false
 }
 
 // ValidateFileName accepts a plain file name for --name (no directories).

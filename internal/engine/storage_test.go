@@ -90,8 +90,8 @@ func TestWorkDiscardRemovesSegments(t *testing.T) {
 }
 
 func TestWorkErrorsOnUnwritableDirectories(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores permissions")
+	if os.Geteuid() <= 0 { // root ignores permissions; Windows has no POSIX modes
+		t.Skip("needs POSIX permissions and a non-root user")
 	}
 	dir := t.TempDir()
 	w, err := WorkDir(dir)

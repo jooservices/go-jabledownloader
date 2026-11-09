@@ -50,8 +50,12 @@ type Browser struct {
 // retries once without the sandbox unless CHROME_NO_SANDBOX=0.
 func NewBrowser(ctx context.Context) (*Browser, error) {
 	var lastErr error
+	chromePath := os.Getenv("CHROME_PATH")
+	if strings.TrimSpace(chromePath) == "" {
+		chromePath = detectBrowser(hostProbe())
+	}
 	for i, noSandbox := range launchPlan(os.Getenv("CHROME_NO_SANDBOX")) {
-		b, err := launch(ctx, allocatorOptions(noSandbox, os.Getenv("CHROME_PATH"), os.Getenv("JABLE_CHROME_PROFILE")))
+		b, err := launch(ctx, allocatorOptions(noSandbox, chromePath, os.Getenv("JABLE_CHROME_PROFILE")))
 		if err == nil {
 			b.SandboxFallback = i > 0
 			return b, nil

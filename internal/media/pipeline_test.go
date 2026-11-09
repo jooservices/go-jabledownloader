@@ -234,8 +234,8 @@ func TestValidate(t *testing.T) {
 }
 
 func TestRunReportsUnwritableSidecarLocation(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores permissions")
+	if os.Geteuid() <= 0 { // root ignores permissions; Windows has no POSIX modes
+		t.Skip("needs POSIX permissions and a non-root user")
 	}
 	s := newSetup(t, Options{})
 	dir := filepath.Dir(s.video)

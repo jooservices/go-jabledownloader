@@ -18,9 +18,25 @@ type Config struct {
 // DefaultWorkerCount is used when neither the config file nor flags set one.
 const DefaultWorkerCount = 16
 
+// DirEnv overrides the config directory (containers, services, tests).
+const DirEnv = "JABLEDOWNLOADER_CONFIG_DIR"
+
+// configDir resolves the config directory: DirEnv first, then the legacy
+// ~/.config/jabledownloader when it already holds a config (so existing
+// installs keep working), then the OS-native user config directory.
 func configDir() string {
+	if dir := os.Getenv(DirEnv); dir != "" {
+		return dir
+	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "jabledownloader")
+	legacy := filepath.Join(home, ".config", "jabledownloader")
+	if _, err := os.Stat(filepath.Join(legacy, "config.json")); err == nil {
+		return legacy
+	}
+	if base, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(base, "jabledownloader")
+	}
+	return legacy
 }
 
 func configPath() string {

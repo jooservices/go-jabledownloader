@@ -4,7 +4,7 @@ IMAGE   := jooservices/go-jabledownloader
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: build run fmt vet lint test test-browser coverage-check cover cover-html ci docker-build docker-run docker-test clean
+.PHONY: test-e2e build run fmt vet lint test test-browser coverage-check cover cover-html ci docker-build docker-run docker-test clean
 
 build: ## Build the CLI binary
 	$(GOFLAGS) go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/jabledownloader
@@ -24,6 +24,9 @@ lint: ## Run golangci-lint (installed in the CI image)
 test: ## Run tests with race detector and coverage
 	go test -race -coverprofile=coverage.out ./...
 	$(MAKE) coverage-check
+
+test-e2e: ## Hermetic end-to-end: real engines + ffmpeg vs a local server (E2E_OUT=dir keeps output)
+	go test -count=1 -v ./internal/e2e/
 
 test-browser: ## Real-Chrome tests (e2e tag); merges their coverage into coverage.out
 	CHROME_PATH=$${CHROME_PATH:-/usr/bin/chromium} go test -race -tags e2e -run Browser -coverprofile=coverage-browser.out ./internal/site/jable/

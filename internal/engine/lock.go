@@ -28,20 +28,13 @@ func acquireLock(path string) (*lock, error) {
 	return &lock{file: file}, nil
 }
 
-// release removes the lock file while still holding the lock, then unlocks
-// by closing it, so no other process can lock the unlinked file first.
+// release deletes the lock file and drops the OS lock. The order is
+// platform-specific (see removeLockFile).
 func (l *lock) release() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
-	removeErr := os.Remove(l.file.Name())
-	closeErr := l.file.Close()
+	file := l.file
 	l.file = nil
-	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return fmt.Errorf("remove lock: %w", removeErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("release lock: %w", closeErr)
-	}
-	return nil
+	return removeLockFile(file)
 }
