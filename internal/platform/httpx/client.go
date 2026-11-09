@@ -5,11 +5,24 @@ package httpx
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
+
+// AbsoluteHTTP parses raw and accepts only an absolute http or https URL.
+// Playlist and media URLs come from untrusted pages, so other schemes never
+// reach the HTTP client or ffmpeg.
+func AbsoluteHTTP(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("media URL must be absolute http or https")
+	}
+	return u, nil
+}
 
 // DefaultUserAgent is the desktop Chrome User-Agent sent when a request does
 // not carry its own. It is the only User-Agent literal in the module.

@@ -28,7 +28,7 @@ export to the JOOservices OpenObserve platform.
 - v4 runs as `jabledownloader` under the new `go-jabledownloader` module; rewrite call sites and archived settings for the v4 API.
 - Output naming is now `<code>-<codec>.mp4` (e.g. `start-166-h264.mp4`); the codec is resolved from the master playlist.
 - Parallel segment downloads with retry/backoff, cross-run resume, and ffmpeg concat.
-- Optional English soft/hard subtitles via host `mlx_whisper` (`--subtitle`).
+- Optional English soft/hard subtitles via a host Whisper CLI (`--subtitle`). Apple Silicon uses MLX when `mlx_whisper` is installed; every other machine uses `whisper`.
 - Optional, fail-open OpenTelemetry export to JOOservices OpenObserve (`OBS_*` env vars, off by default).
 
 ## Features
@@ -54,8 +54,9 @@ export to the JOOservices OpenObserve platform.
   `--download` is passed explicitly.
 - Parallel segment downloading with retry/backoff, cross-run resume, ffmpeg concat
 - `--quality` to cap height (`best`, `240`, `360`, `480`, `720`, `1080`)
-- `--subtitle` — subtitles via host `mlx_whisper`; English by default
-  (Whisper translates directly), other languages via `--subtitle-lang` + `--translator`
+- `--subtitle` — subtitles via a host Whisper CLI; English by default
+  (Whisper translates directly), other languages via `--subtitle-lang` + `--translator`.
+  `--whisper-backend auto` picks MLX on Apple Silicon when `mlx_whisper` is installed, and `whisper` on every other machine
 - `--subtitle-mode soft|hard` — soft = separate track + `.<lang>.srt`; hard = burn-in
 - `--dry-run` preview with size estimates
 - Videos are saved to `<out>/<site>/<code>/`; customise with `--path-template`
@@ -68,26 +69,41 @@ export to the JOOservices OpenObserve platform.
 - ffmpeg (HLS concat/remux; also audio extract + subtitle embed when `--subtitle`)
 - Chrome/Chromium (Jable scraping only — bypasses Cloudflare). EPORNER and
   other server-rendered sites need no browser
-- **Optional (host, `--subtitle` only):** [`mlx-whisper`](https://pypi.org/project/mlx-whisper/) on PATH
-  (Apple Silicon). Install yourself — agents must not install packages:
+- **Optional (host, `--subtitle` only):** a Whisper CLI on PATH. Install it yourself:
   ```bash
+  # Apple Silicon (M1 or later)
   uv tool install mlx-whisper
-  # or: pipx install mlx-whisper
+  # Intel, AMD, and ARM — macOS, Ubuntu, Windows
+  pipx install openai-whisper
   ```
-  Default model: `mlx-community/whisper-medium` (override with `--whisper-model`).
-  Do not use `whisper-large-v3-turbo` for English translate — on MLX it often
+  `auto` uses MLX only when `mlx_whisper` is on PATH, otherwise `whisper`.
+  `--whisper-backend mlx` can launch MLX through `uvx` when the binary is absent.
+  Override with `--whisper-backend mlx|whisper`.
+  Default model: `mlx-community/whisper-medium` on MLX, `medium` on the portable CLI
+  (`--whisper-model`). Do not use `whisper-large-v3-turbo` for English translate — on MLX it often
   keeps Japanese. `--subtitle-mode hard` also needs an ffmpeg build with **libass** (`subtitles`
-  filter). Confirm with `ffmpeg -filters | grep subtitles`. Soft mode works
+  filter). Confirm with `ffmpeg -hide_banner -filters`. Soft mode works
   without libass.
 - Go 1.26 only when building from source; prebuilt archives need none
 - Docker is preferred for lint/CI; host Go is OK when it matches `go 1.26`.
   Running the released binary does not require Docker. **Subtitle generation is a
-  host feature** (mlx_whisper / Metal) — do not rely on the project Docker image for it.
+  host feature** (MLX on Apple Silicon, `whisper` everywhere else) — do not rely on the project Docker image for it.
 
 ## Installation
 
-Prebuilt archives for macOS, Linux, and Windows (`amd64`/`arm64`) are attached
-to every [GitHub Release](https://github.com/jooservices/go-jabledownloader/releases).
+Prebuilt archives cover macOS, Ubuntu/Linux, and Windows. `amd64` is Intel and AMD.
+`arm64` is Apple M, ARM Linux, and Windows on ARM:
+
+| Machine | Archive |
+| --- | --- |
+| Apple M | `darwin_arm64` |
+| Intel Mac | `darwin_amd64` |
+| Ubuntu or other Linux, Intel or AMD | `linux_amd64` |
+| Linux on ARM, including an Apple M VM | `linux_arm64` |
+| Windows, Intel or AMD | `windows_amd64` |
+| Windows on ARM | `windows_arm64` |
+
+Archives are attached to every [GitHub Release](https://github.com/jooservices/go-jabledownloader/releases).
 macOS example (Linux archives contain the same `jabledownloader` binary;
 Windows archives contain `jabledownloader.exe`):
 
@@ -121,8 +137,8 @@ Subtitles (`--subtitle`) run on the **host** after the MP4 is ready, as a
 pipeline of replaceable steps:
 
 1. **Extract audio** — `ffmpeg` (16 kHz mono WAV).
-2. **Transcribe** — `mlx_whisper` (default model `mlx-community/whisper-medium`,
-   spoken language `--spoken-language`, default `ja`).
+2. **Transcribe** — MLX on Apple Silicon (`mlx-community/whisper-medium`) or
+   `whisper` on every other machine (`medium`). Spoken language `--spoken-language`, default `ja`.
 3. **Translate** — with the default `--translator auto` and `--subtitle-lang en`,
    Whisper translates directly (`--task translate`). For any other language,
    Whisper transcribes and the named `--translator` translates.

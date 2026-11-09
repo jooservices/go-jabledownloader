@@ -78,7 +78,7 @@ func TestSoftApplyErrors(t *testing.T) {
 }
 
 func TestHardApplyUsesPlatformEncoder(t *testing.T) {
-	for goos, want := range map[string]string{"darwin": "h264_videotoolbox", "linux": "libx264"} {
+	for goos, want := range map[string]string{"darwin": "h264_videotoolbox", "linux": "libx264", "windows": "libx264"} {
 		runner := &fakeRunner{filters: " ... subtitles         V->V       Render text subtitles"}
 		if err := (&Hard{Runner: runner, GOOS: goos}).Apply(context.Background(), "in.mp4", "sub:s[1].srt", "out.mp4"); err != nil {
 			t.Fatal(err)

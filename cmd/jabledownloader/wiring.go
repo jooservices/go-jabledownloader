@@ -150,10 +150,13 @@ func newSubtitler(o *options, runner media.Runner, progress io.Writer) (app.Subt
 	if _, err := subtitle.ParseMode(o.subtitleMode); err != nil {
 		return nil, err
 	}
+	if _, err := asr.ParseBackend(o.whisperBackend); err != nil {
+		return nil, err
+	}
 	if !o.subtitle {
 		return nil, nil
 	}
-	whisper, err := asr.New(runner, o.whisperModel)
+	whisper, err := asr.New(runner, o.whisperModel, o.whisperBackend)
 	if err != nil {
 		return nil, err
 	}

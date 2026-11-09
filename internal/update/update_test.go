@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +20,38 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	releasePublicKey = public
+	testPrivate = private
+	os.Exit(m.Run())
+}
+
+var testPrivate ed25519.PrivateKey
+
+const testSignatureURL = "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt.sig"
+
+func serveRelease(body string, archive []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "checksums.txt.sig"):
+			signature, err := SignChecksums(testPrivate, []byte(body))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(signature))
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			_, _ = io.WriteString(w, body)
+		default:
+			_, _ = w.Write(archive)
+		}
+	}
+}
 
 func TestIsNewer(t *testing.T) {
 	cases := []struct {
@@ -90,6 +125,28 @@ func TestValidateAssetURLAndChecksum(t *testing.T) {
 	}
 }
 
+func TestAssetForEveryOSAndCPU(t *testing.T) {
+	platforms := [][2]string{
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"},
+	}
+	rel := Release{}
+	for _, p := range platforms {
+		rel.Assets = append(rel.Assets, Asset{Name: "jabledownloader_v1_" + p[0] + "_" + p[1] + ".tar.gz"})
+	}
+	for _, p := range platforms {
+		got := rel.assetFor(p[0], p[1])
+		want := "jabledownloader_v1_" + p[0] + "_" + p[1] + ".tar.gz"
+		if got == nil || got.Name != want {
+			t.Fatalf("%s/%s asset = %+v, want %s", p[0], p[1], got, want)
+		}
+	}
+	if rel.assetFor("freebsd", "amd64") != nil {
+		t.Fatal("expected no archive for an unreleased OS")
+	}
+}
+
 func TestAssetFor(t *testing.T) {
 	rel := Release{Assets: []Asset{
 		{Name: "jabledownloader_v1.0.0_linux_amd64.tar.gz"},
@@ -112,10 +169,11 @@ func TestAssetFor(t *testing.T) {
 func TestAssetForCarriesChecksumURL(t *testing.T) {
 	rel := Release{Assets: []Asset{
 		{Name: "checksums.txt", BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt"},
+		{Name: "checksums.txt.sig", BrowserDownloadURL: testSignatureURL},
 		{Name: fmt.Sprintf("jabledownloader_v1_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH), BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/a.tar.gz"},
 	}}
 	a := rel.AssetFor()
-	if a == nil || a.ChecksumURL == "" {
+	if a == nil || a.ChecksumURL == "" || a.SignatureURL != testSignatureURL {
 		t.Fatalf("asset=%+v", a)
 	}
 }
@@ -317,13 +375,8 @@ func TestLatestReleaseBadJSON(t *testing.T) {
 
 func TestInstallLocateError(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("x"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			_, _ = fmt.Fprintf(w, "%x  dist/release.tar.gz\n", sha256.Sum256(archive))
-			return
-		}
-		_, _ = w.Write(archive)
-	}))
+	body := fmt.Sprintf("%x  dist/release.tar.gz\n", sha256.Sum256(archive))
+	srv := httptest.NewServer(serveRelease(body, archive))
 	defer srv.Close()
 	oldClient := httpClient
 	httpClient = &http.Client{Transport: &rewriteTransport{base: srv.Client().Transport, target: mustURL(t, srv.URL)}}
@@ -337,6 +390,7 @@ func TestInstallLocateError(t *testing.T) {
 		Name:               "release.tar.gz",
 		BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/release.tar.gz",
 		ChecksumURL:        "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt",
+		SignatureURL:       testSignatureURL,
 		Size:               int64(len(archive)),
 	})
 	if err == nil || !strings.Contains(err.Error(), "locate") {
@@ -346,14 +400,8 @@ func TestInstallLocateError(t *testing.T) {
 
 func TestInstall(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("#!/bin/sh\necho new\n"))
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			_, _ = fmt.Fprintf(w, "%x  dist/release.tar.gz\n", sha256.Sum256(archive))
-			return
-		}
-		_, _ = w.Write(archive)
-	}))
+	body := fmt.Sprintf("%x  dist/release.tar.gz\n", sha256.Sum256(archive))
+	srv := httptest.NewServer(serveRelease(body, archive))
 	defer srv.Close()
 
 	oldClient := httpClient
@@ -374,6 +422,7 @@ func TestInstall(t *testing.T) {
 		Name:               "release.tar.gz",
 		BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/release.tar.gz",
 		ChecksumURL:        "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt",
+		SignatureURL:       testSignatureURL,
 		Size:               int64(len(archive)),
 	}
 	if _, err := Install(context.Background(), asset); err != nil {
@@ -393,13 +442,8 @@ func TestInstall(t *testing.T) {
 
 func TestInstallChecksumMismatchPreservesOriginal(t *testing.T) {
 	archive := buildReleaseArchive(t, []byte("new"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			_, _ = fmt.Fprintln(w, strings.Repeat("0", sha256.Size*2)+"  dist/release.tar.gz")
-			return
-		}
-		_, _ = w.Write(archive)
-	}))
+	body := strings.Repeat("0", sha256.Size*2) + "  dist/release.tar.gz\n"
+	srv := httptest.NewServer(serveRelease(body, archive))
 	defer srv.Close()
 	oldClient := httpClient
 	httpClient = &http.Client{Transport: &rewriteTransport{base: srv.Client().Transport, target: mustURL(t, srv.URL)}}
@@ -419,6 +463,7 @@ func TestInstallChecksumMismatchPreservesOriginal(t *testing.T) {
 		Name:               "release.tar.gz",
 		BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/release.tar.gz",
 		ChecksumURL:        "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt",
+		SignatureURL:       testSignatureURL,
 		Size:               int64(len(archive)),
 	})
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
@@ -445,6 +490,7 @@ func TestInstallRejectsUntrustedAssetURL(t *testing.T) {
 		Name:               "release.tar.gz",
 		BrowserDownloadURL: "http://evil/x.tar.gz",
 		ChecksumURL:        "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt",
+		SignatureURL:       testSignatureURL,
 	})
 	if err == nil || !strings.Contains(err.Error(), "must use https") {
 		t.Fatalf("expected URL rejection, got %v", err)
@@ -597,6 +643,7 @@ func validAsset(size int64) *Asset {
 		Name:               "release.tar.gz",
 		BrowserDownloadURL: "https://github.com/jooservices/go-jabledownloader/releases/download/v1/release.tar.gz",
 		ChecksumURL:        "https://github.com/jooservices/go-jabledownloader/releases/download/v1/checksums.txt",
+		SignatureURL:       testSignatureURL,
 		Size:               size,
 	}
 }
@@ -612,6 +659,7 @@ func TestInstallRejectsInvalidAssetsBeforeDownloading(t *testing.T) {
 	for name, asset := range map[string]*Asset{
 		"nil":             nil,
 		"no checksums":    bad(func(a *Asset) { a.ChecksumURL = "" }),
+		"no signature":    bad(func(a *Asset) { a.SignatureURL = "" }),
 		"http asset":      bad(func(a *Asset) { a.BrowserDownloadURL = "http://github.com/x.tar.gz" }),
 		"foreign sums":    bad(func(a *Asset) { a.ChecksumURL = "https://evil.test/checksums.txt" }),
 		"oversized asset": bad(func(a *Asset) { a.Size = maxUpdateSize + 1 }),
@@ -658,9 +706,10 @@ func TestInstallArchiveDownloadFailures(t *testing.T) {
 		"http error": {func(w http.ResponseWriter) { w.WriteHeader(http.StatusBadGateway) }, "http status 502"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			body := strings.Repeat("0", 64) + "  release.tar.gz\n"
 			withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-					_, _ = fmt.Fprintln(w, strings.Repeat("0", 64)+"  release.tar.gz")
+				if strings.Contains(r.URL.Path, "checksums.txt") {
+					serveRelease(body, nil).ServeHTTP(w, r)
 					return
 				}
 				tc.handler(w)
@@ -690,13 +739,8 @@ func TestInstallReadOnlyLocationKeepsBinary(t *testing.T) {
 		t.Skip("permission semantics differ")
 	}
 	archive := buildReleaseArchive(t, []byte("new"))
-	withTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			_, _ = fmt.Fprintf(w, "%x  dist/release.tar.gz\n", sha256.Sum256(archive))
-			return
-		}
-		_, _ = w.Write(archive)
-	}))
+	body := fmt.Sprintf("%x  dist/release.tar.gz\n", sha256.Sum256(archive))
+	withTestClient(t, serveRelease(body, archive))
 	dir := t.TempDir()
 	current := filepath.Join(dir, "current-bin")
 	if err := os.WriteFile(current, []byte("old"), 0o755); err != nil {

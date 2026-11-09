@@ -213,15 +213,15 @@ func (r logReporter) Report(ev app.Event) {
 }
 
 // subtitleHostCheck reports why subtitles cannot run here: they need ffmpeg
-// and a Whisper backend (mlx_whisper, or uvx to fetch it).
+// and a Whisper CLI (whisper, mlx_whisper, or uvx).
 func subtitleHostCheck(r media.Runner) error {
 	if _, err := r.LookPath("ffmpeg"); err != nil {
 		return errors.New("ffmpeg not found")
 	}
-	for _, name := range []string{"mlx_whisper", "uvx"} {
+	for _, name := range []string{"mlx_whisper", "whisper", "uvx"} {
 		if _, err := r.LookPath(name); err == nil {
 			return nil
 		}
 	}
-	return errors.New("no Whisper backend found (mlx_whisper or uvx)")
+	return errors.New("no Whisper backend found (whisper, mlx_whisper, or uvx)")
 }

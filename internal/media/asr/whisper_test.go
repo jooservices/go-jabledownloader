@@ -12,7 +12,8 @@ import (
 
 func TestWhisperTranscribeUsesLanguageAndParsesSRT(t *testing.T) {
 	runner := &fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
-	w, _ := New(runner, "model")
+	w, _ := New(runner, "model", "")
+	w.GOOS, w.GOARCH = "darwin", "arm64"
 	cues, err := w.Transcribe(context.Background(), "audio.wav", "ja")
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestWhisperTranscribeUsesLanguageAndParsesSRT(t *testing.T) {
 
 func TestWhisperTranscribeToEnglishUsesTranslate(t *testing.T) {
 	runner := &fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nHello world\n"}
-	cues, err := (&Whisper{Runner: runner}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
+	cues, err := (&Whisper{Runner: runner, GOOS: "darwin", GOARCH: "arm64"}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,10 +41,14 @@ func TestWhisperTranscribeToEnglishUsesTranslate(t *testing.T) {
 }
 
 func TestWhisperRejectsJapaneseDirectEnglishOutput(t *testing.T) {
-	runner := &fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nこんにちは世界\n"}
-	_, err := (&Whisper{Runner: runner}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
-	if err == nil || !strings.Contains(err.Error(), "looks Japanese") {
-		t.Fatalf("expected Japanese validation error, got %v", err)
+	japanese := "1\n00:00:00,000 --> 00:00:01,000\nこんにちは世界\n"
+	_, err := (&Whisper{Runner: &fakeRunner{srt: japanese}, Backend: BackendMLX}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
+	if err == nil || !strings.Contains(err.Error(), "looks Japanese") || !strings.Contains(err.Error(), "mlx-community/whisper-medium") {
+		t.Fatalf("expected MLX model hint, got %v", err)
+	}
+	_, err = (&Whisper{Runner: &fakeRunner{whisper: "/usr/bin/whisper", srt: japanese}, Backend: BackendWhisper}).TranscribeTo(context.Background(), "audio.wav", "ja", "en")
+	if err == nil || !strings.Contains(err.Error(), "--whisper-model medium") || strings.Contains(err.Error(), "mlx-community") {
+		t.Fatalf("expected portable model hint, got %v", err)
 	}
 }
 
@@ -56,7 +61,8 @@ func TestWhisperSupportsEnglishOnly(t *testing.T) {
 
 func TestWhisperFallsBackToUvx(t *testing.T) {
 	runner := &fakeRunner{uvx: "/usr/bin/uvx", srt: "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}
-	if _, err := (&Whisper{Runner: runner}).Transcribe(context.Background(), "audio.wav", "ja"); err != nil {
+	w := &Whisper{Runner: runner, Backend: BackendMLX, GOOS: "darwin", GOARCH: "arm64"}
+	if _, err := w.Transcribe(context.Background(), "audio.wav", "ja"); err != nil {
 		t.Fatal(err)
 	}
 	if runner.name != "/usr/bin/uvx" || len(runner.args) < 4 || strings.Join(runner.args[:3], " ") != "--from mlx-whisper mlx_whisper" {
@@ -66,28 +72,31 @@ func TestWhisperFallsBackToUvx(t *testing.T) {
 
 func TestWhisperReportsRunnerFailure(t *testing.T) {
 	runner := &fakeRunner{err: errors.New("failed")}
-	_, err := (&Whisper{Runner: runner}).Transcribe(context.Background(), "audio.wav", "ja")
+	_, err := (&Whisper{Runner: runner, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "audio.wav", "ja")
 	if err == nil || !strings.Contains(err.Error(), "mlx_whisper transcribe") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestWhisperReportsMissingOrInvalidOutput(t *testing.T) {
-	if _, err := (&Whisper{Runner: &fakeRunner{skipWrite: true}}).Transcribe(context.Background(), "a.wav", ""); err == nil || !strings.Contains(err.Error(), "did not produce") {
+	if _, err := (&Whisper{Runner: &fakeRunner{skipWrite: true}, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "a.wav", ""); err == nil || !strings.Contains(err.Error(), "did not produce") {
 		t.Fatalf("missing output err = %v", err)
 	}
-	if _, err := (&Whisper{Runner: &fakeRunner{srt: "x\nbroken\n"}}).Transcribe(context.Background(), "a.wav", ""); err == nil || !strings.Contains(err.Error(), "parse whisper SRT") {
+	if _, err := (&Whisper{Runner: &fakeRunner{srt: "x\nbroken\n"}, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "a.wav", ""); err == nil || !strings.Contains(err.Error(), "parse whisper SRT") {
 		t.Fatalf("invalid output err = %v", err)
 	}
 }
 
 func TestWhisperValidationAndResolutionErrors(t *testing.T) {
-	if _, err := New(nil, ""); err == nil {
+	if _, err := New(nil, "", ""); err == nil {
 		t.Fatal("expected runner error")
 	}
+	if _, err := New(&fakeRunner{}, "", "cuda"); err == nil {
+		t.Fatal("expected backend error")
+	}
 	runner := &fakeRunner{missing: true}
-	w, err := New(runner, " ")
-	if err != nil || w.Model != DefaultModel {
+	w, err := New(runner, " ", "")
+	if err != nil || w.Model != "" {
 		t.Fatalf("w=%+v err=%v", w, err)
 	}
 	if _, err := w.Transcribe(context.Background(), "", "ja"); err == nil {
@@ -102,24 +111,29 @@ func TestWhisperValidationAndResolutionErrors(t *testing.T) {
 }
 
 type fakeRunner struct {
-	name      string
-	args      []string
-	uvx       string
-	srt       string
-	err       error
-	missing   bool
-	skipWrite bool
+	name        string
+	args        []string
+	uvx         string
+	whisper     string
+	whisperOnly bool
+	srt         string
+	err         error
+	missing     bool
+	skipWrite   bool
 }
 
 func (f *fakeRunner) LookPath(file string) (string, error) {
 	if f.missing {
 		return "", os.ErrNotExist
 	}
-	if file == "mlx_whisper" && f.uvx == "" {
+	if file == "mlx_whisper" && f.uvx == "" && !f.whisperOnly {
 		return "/usr/bin/mlx_whisper", nil
 	}
 	if file == "uvx" && f.uvx != "" {
 		return f.uvx, nil
+	}
+	if file == "whisper" && f.whisper != "" {
+		return f.whisper, nil
 	}
 	return "", os.ErrNotExist
 }
@@ -131,10 +145,18 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 		return nil, f.err
 	}
 	for i := 0; i < len(args)-1 && !f.skipWrite; i++ {
-		if args[i] == "--output-dir" {
-			if err := os.WriteFile(filepath.Join(args[i+1], "transcription.srt"), []byte(f.srt), 0o600); err != nil {
-				return nil, err
-			}
+		var name string
+		switch args[i] {
+		case "--output-dir":
+			name = "transcription.srt"
+		case "--output_dir":
+			stem := strings.TrimSuffix(filepath.Base(args[0]), filepath.Ext(args[0]))
+			name = stem + ".srt"
+		default:
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(args[i+1], name), []byte(f.srt), 0o600); err != nil {
+			return nil, err
 		}
 	}
 	return nil, nil
@@ -155,7 +177,7 @@ func (s *streamingRunner) RunStreaming(ctx context.Context, out io.Writer, name 
 func TestWhisperStreamsProgressWhenRequested(t *testing.T) {
 	runner := &streamingRunner{fakeRunner: fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}}
 	var progress strings.Builder
-	w := &Whisper{Runner: runner, Progress: &progress}
+	w := &Whisper{Runner: runner, Progress: &progress, GOOS: "darwin", GOARCH: "arm64"}
 
 	if _, err := w.Transcribe(context.Background(), "audio.wav", "ja"); err != nil {
 		t.Fatal(err)
@@ -165,7 +187,117 @@ func TestWhisperStreamsProgressWhenRequested(t *testing.T) {
 	}
 
 	quiet := &streamingRunner{fakeRunner: fakeRunner{srt: "1\n00:00:00,000 --> 00:00:01,000\nHello\n"}}
-	if _, err := (&Whisper{Runner: quiet}).Transcribe(context.Background(), "audio.wav", "ja"); err != nil || quiet.streamed {
+	if _, err := (&Whisper{Runner: quiet, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "audio.wav", "ja"); err != nil || quiet.streamed {
 		t.Fatalf("without Progress must not stream: streamed=%v err=%v", quiet.streamed, err)
 	}
+}
+
+func TestAutoBackendFollowsCPUAndOS(t *testing.T) {
+	srt := "1\n00:00:00,000 --> 00:00:01,000\nHello\n"
+	both := &fakeRunner{uvx: "/usr/bin/uvx", whisper: "/usr/bin/whisper", srt: srt}
+
+	apple := &Whisper{Runner: both, GOOS: "darwin", GOARCH: "arm64"}
+	if _, err := apple.Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	if both.name != "/usr/bin/whisper" {
+		t.Fatalf("Apple M without mlx_whisper should use whisper, ran %s", both.name)
+	}
+
+	both.name = ""
+	pinned := &Whisper{Runner: both, Backend: BackendWhisper, GOOS: "darwin", GOARCH: "arm64"}
+	if _, err := pinned.Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	if both.name != "/usr/bin/whisper" {
+		t.Fatalf("explicit whisper on Apple M must not use uvx, ran %s", both.name)
+	}
+
+	onlyUVX := &fakeRunner{uvx: "/usr/bin/uvx", srt: srt}
+	if _, err := (&Whisper{Runner: onlyUVX, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "clip.wav", "ja"); err == nil || onlyUVX.name != "" {
+		t.Fatalf("auto must not launch uvx: name=%s err=%v", onlyUVX.name, err)
+	}
+
+	installed := &fakeRunner{srt: srt}
+	if _, err := (&Whisper{Runner: installed, GOOS: "darwin", GOARCH: "arm64"}).Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	if installed.name != "/usr/bin/mlx_whisper" {
+		t.Fatalf("installed mlx_whisper should win, ran %s", installed.name)
+	}
+
+	both.name = ""
+	intel := &Whisper{Runner: both, GOOS: "linux", GOARCH: "amd64"}
+	if _, err := intel.Transcribe(context.Background(), "clip.wav", "ja"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(both.args, " ")
+	if both.name != "/usr/bin/whisper" || !strings.Contains(joined, "--output_format srt") || !strings.Contains(joined, "--model medium") {
+		t.Fatalf("Intel/AMD should use portable whisper: %s %s", both.name, joined)
+	}
+
+	windows := &fakeRunner{srt: srt}
+	w := &Whisper{Runner: windows, Backend: BackendWhisper, GOOS: "windows", GOARCH: "amd64"}
+	if _, err := w.Transcribe(context.Background(), "clip.wav", ""); err == nil || !strings.Contains(err.Error(), "pipx install openai-whisper") {
+		t.Fatalf("missing portable whisper err = %v", err)
+	}
+	if _, err := (&Whisper{Runner: &fakeRunner{missing: true}, GOOS: "windows", GOARCH: "amd64"}).Transcribe(context.Background(), "clip.wav", "ja"); err == nil || !strings.Contains(err.Error(), "openai-whisper") || strings.Contains(err.Error(), "mlx-whisper") {
+		t.Fatal("Intel and AMD should only get the portable hint")
+	}
+}
+
+func TestAutoBackendCoversAppleIntelAMDAndEveryOS(t *testing.T) {
+	srt := "1\n00:00:00,000 --> 00:00:01,000\nHello\n"
+	cases := []struct {
+		goos, goarch string
+		mlx, whisper bool
+		want         string
+	}{
+		{"darwin", "arm64", true, true, "/usr/bin/mlx_whisper"},
+		{"darwin", "arm64", true, false, "/usr/bin/mlx_whisper"},
+		{"darwin", "arm64", false, true, "/usr/bin/whisper"},
+		{"darwin", "amd64", true, true, "/usr/bin/whisper"},
+		{"darwin", "amd64", false, true, "/usr/bin/whisper"},
+		{"darwin", "amd64", true, false, ""},
+		{"linux", "amd64", true, true, "/usr/bin/whisper"},
+		{"linux", "amd64", false, true, "/usr/bin/whisper"},
+		{"linux", "arm64", true, true, "/usr/bin/whisper"},
+		{"linux", "arm64", false, true, "/usr/bin/whisper"},
+		{"windows", "amd64", true, true, "/usr/bin/whisper"},
+		{"windows", "amd64", false, true, "/usr/bin/whisper"},
+		{"windows", "arm64", true, false, ""},
+		{"windows", "arm64", false, true, "/usr/bin/whisper"},
+	}
+	for _, tc := range cases {
+		runner := &hostRunner{fakeRunner: fakeRunner{srt: srt}, mlx: tc.mlx, whisper: tc.whisper}
+		_, err := (&Whisper{Runner: runner, GOOS: tc.goos, GOARCH: tc.goarch}).Transcribe(context.Background(), "clip.wav", "ja")
+		if tc.want == "" {
+			if err == nil || runner.name != "" {
+				t.Errorf("%s/%s mlx=%v whisper=%v ran %s err=%v", tc.goos, tc.goarch, tc.mlx, tc.whisper, runner.name, err)
+			}
+			continue
+		}
+		if err != nil || runner.name != tc.want {
+			t.Errorf("%s/%s mlx=%v whisper=%v ran %s err=%v, want %s", tc.goos, tc.goarch, tc.mlx, tc.whisper, runner.name, err, tc.want)
+		}
+	}
+}
+
+type hostRunner struct {
+	fakeRunner
+	mlx, whisper bool
+}
+
+func (h *hostRunner) LookPath(file string) (string, error) {
+	switch file {
+	case "mlx_whisper":
+		if h.mlx {
+			return "/usr/bin/mlx_whisper", nil
+		}
+	case "whisper":
+		if h.whisper {
+			return "/usr/bin/whisper", nil
+		}
+	}
+	return "", os.ErrNotExist
 }

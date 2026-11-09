@@ -294,6 +294,9 @@ func TestDownloadReportsHTTPErrorAndValidation(t *testing.T) {
 	if _, err := d.Download(context.Background(), engine.Request{}, nil); err == nil {
 		t.Fatal("expected validation error")
 	}
+	if _, err := d.Download(context.Background(), request("file:///tmp/v.mp4", t.TempDir(), 1), nil); err == nil || !strings.Contains(err.Error(), "http or https") {
+		t.Fatalf("err = %v", err)
+	}
 	wrongKind := request(ts.URL, t.TempDir(), 1)
 	wrongKind.Source.Kind = domain.SourceHLS
 	if _, err := d.Download(context.Background(), wrongKind, nil); err == nil {

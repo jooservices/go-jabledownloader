@@ -17,10 +17,12 @@ This file adds project-only rules.
   progress leaves via `domain.EventSink`. Prefer stdlib + `golang.org/x/sync`
 - Sites depend on a `site.Fetcher`; no global browser. Jable uses one shared
   headless Chrome (tab per page); keep automation signals off
-- `internal/media` is host-only (mlx_whisper + ffmpeg): audio → asr →
-  translate → subtitle. Default mode soft, model `mlx-community/whisper-medium`,
-  spoken language `ja`, target `en`. New translators register in
-  `internal/media/translate` and must pass `contracttest.Run`
+- `internal/media` is host-only (ffmpeg + a Whisper CLI): audio → asr →
+  translate → subtitle. Default mode soft, spoken language `ja`, target `en`.
+  `--whisper-backend auto` uses MLX on Apple Silicon when `mlx_whisper` is
+  installed, and `whisper` on every other machine (Intel, AMD, and ARM on
+  macOS, Ubuntu, and Windows). Defaults: `mlx-community/whisper-medium` and `medium`.
+  New translators register in `internal/media/translate` and must pass `contracttest.Run`
 - Tests stay network-free and credentials-free. No unit test launches Chrome
   (browser tests use the `e2e` build tag and run via `make test-browser`). Site fixtures are real pages
   captured with `go test -tags fixtures ./internal/site/...` and recorded in
@@ -32,9 +34,9 @@ This file adds project-only rules.
   `<code>-<codec>.<lang>.srt`. `get --json` keeps the v4.3 keys
 - Exit codes: `0` success, `1` error, `2` partial batch or discovery failure
   (`PlanError`, `DiscoveryError`), `130` interrupted (Ctrl-C; re-run resumes)
-- Subtitle embedding is host-only (Apple Silicon `mlx_whisper`); never required
-  in Docker/CI. Agents must not install packages — document host install commands
-  for the user instead
+- Subtitle embedding is host-only and never required in Docker/CI. Apple Silicon
+  uses an installed `mlx_whisper`; every other machine uses `whisper`.
+  Agents must not install packages — document host install commands for the user instead
 - Release assets: `jabledownloader_vX.Y.Z_{goos}_{goarch}.tar.gz` (built by
   `make release`); tags from `master`
 - Telemetry is optional and fail-open: `OBS_*` env vars activate it; OBS being

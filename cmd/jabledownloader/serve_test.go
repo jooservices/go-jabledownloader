@@ -152,6 +152,7 @@ func TestSubtitleHostCheck(t *testing.T) {
 	}{
 		{map[string]bool{"ffmpeg": true, "mlx_whisper": true}, true},
 		{map[string]bool{"ffmpeg": true, "uvx": true}, true},
+		{map[string]bool{"ffmpeg": true, "whisper": true}, true},
 		{map[string]bool{"ffmpeg": true}, false},
 		{map[string]bool{"mlx_whisper": true}, false},
 	}

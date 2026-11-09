@@ -110,6 +110,9 @@ func remux(ctx context.Context, mediaURL string, headers http.Header, out string
 }
 
 func remuxArgs(mediaURL string, headers http.Header, out string) ([]string, error) {
+	if _, err := httpx.AbsoluteHTTP(mediaURL); err != nil {
+		return nil, err
+	}
 	headerBlock, err := ffmpegHeaders(headers)
 	if err != nil {
 		return nil, err

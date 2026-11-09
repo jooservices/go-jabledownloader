@@ -121,6 +121,9 @@ func (d *Downloader) Download(ctx context.Context, req engine.Request, sink doma
 
 // get sends a GET with the source headers; the body is idle-guarded.
 func (d *Downloader) get(ctx context.Context, src domain.Source, byteRange string) (*http.Response, error) {
+	if _, err := httpx.AbsoluteHTTP(src.URL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
